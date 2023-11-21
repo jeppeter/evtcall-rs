@@ -44,7 +44,6 @@ impl MainLoopWindows {
 	}
 
 	pub fn add_timer(&mut self,bv :Arc<UnsafeCell<dyn EvtTimer>>,interval:i32,conti:bool) -> Result<(),Box<dyn Error>> {
-
 		self.timers.push(EvtTimerWindows::new(bv,interval,conti)?);
 		Ok(())
 	}
