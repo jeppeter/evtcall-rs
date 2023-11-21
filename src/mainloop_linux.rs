@@ -34,7 +34,7 @@ impl MainLoopLinux {
 		})
 	}
 
-	pub fn add_timer(&mut self,_bv :Arc<RefCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
+	pub fn add_timer(&mut self,bv :Arc<UnsafeCell<dyn EvtTimer>>,interval:i32,conti:bool) -> Result<(),Box<dyn Error>> {
 		Ok(())
 	}
 
