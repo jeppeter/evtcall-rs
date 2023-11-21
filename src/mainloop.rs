@@ -24,6 +24,7 @@ pub struct EvtMain {
 }
 
 
+#[cfg(windows)]
 impl EvtMain {
 	#[cfg(windows)]
 	pub fn new() -> Result<Self,Box<dyn Error>> {
@@ -32,35 +33,60 @@ impl EvtMain {
 		})
 	}
 
-	#[cfg(linux)]
+	pub fn add_timer(&mut self,bv :Arc<RefCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
+		return self.ptr.add_timer(bv);
+	}
+
+	pub fn add_event(&mut self,bv :Arc<RefCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
+		return self.ptr.add_event(bv);
+	}
+
+	pub fn remove_timer(&mut self,bv :Arc<RefCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
+		return self.ptr.remove_timer(bv);
+	}
+
+	pub fn remove_event(&mut self,bv :Arc<RefCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
+		return self.ptr.remove_event(bv);
+	}
+
+	pub fn main_loop(&mut self) -> Result<(),Box<dyn Error>> {
+		return self.ptr.main_loop();
+	}
+
+	pub fn break_up(&mut self) -> Result<(),Box<dyn Error>> {
+		return self.ptr.break_up();
+	}
+}
+
+#[cfg(linux)]
+impl EvtMain {
 	pub fn new() -> Result<Self,Box<dyn Error>> {
 		Ok(Self {
 			ptr :MainLoopLinux::new()?,
 		})
 	}
 
-
-	pub fn add_timer(&mut self,_bv :Arc<RefCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
-		Ok(())
+	pub fn add_timer(&mut self,bv :Arc<RefCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
+		return self.ptr.add_timer(bv);
 	}
 
-	pub fn add_event(&mut self,_bv :Arc<RefCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
-		Ok(())
+	pub fn add_event(&mut self,bv :Arc<RefCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
+		return self.ptr.add_event(bv);
 	}
 
-	pub fn remove_timer(&mut self,_bv :Arc<RefCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
-		Ok(())
+	pub fn remove_timer(&mut self,bv :Arc<RefCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
+		return self.ptr.remove_timer(bv);
 	}
 
-	pub fn remove_event(&mut self,_bv :Arc<RefCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
-		Ok(())
+	pub fn remove_event(&mut self,bv :Arc<RefCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
+		return self.ptr.remove_event(bv);
 	}
 
 	pub fn main_loop(&mut self) -> Result<(),Box<dyn Error>> {
-		Ok(())
+		return self.ptr.main_loop();
 	}
 
 	pub fn break_up(&mut self) -> Result<(),Box<dyn Error>> {
-		Ok(())
+		return self.ptr.break_up();
 	}
 }
