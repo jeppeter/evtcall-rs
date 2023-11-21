@@ -4,18 +4,41 @@ use std::error::Error;
 use std::cell::RefCell;
 use std::sync::Arc;
 
+#[cfg(windows)]
+use crate::mainloop_windows::*;
+
+#[cfg(linux)]
+use crate::mainloop_linux::*;
 
 #[allow(dead_code)]
+#[cfg(windows)]
 pub struct EvtMain {
-	epollfd :i32,	
+	ptr :MainLoopWindows,
 }
 
+
+#[allow(dead_code)]
+#[cfg(linux)]
+pub struct EvtMain {
+	ptr :MainLoopLinux,
+}
+
+
 impl EvtMain {
+	#[cfg(windows)]
 	pub fn new() -> Result<Self,Box<dyn Error>> {
 		Ok(Self {
-			epollfd : -1,
+			ptr :MainLoopWindows::new()?,
 		})
 	}
+
+	#[cfg(linux)]
+	pub fn new() -> Result<Self,Box<dyn Error>> {
+		Ok(Self {
+			ptr :MainLoopLinux::new()?,
+		})
+	}
+
 
 	pub fn add_timer(&mut self,_bv :Arc<RefCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
 		Ok(())
