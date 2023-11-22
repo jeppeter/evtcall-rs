@@ -4,29 +4,26 @@ use std::error::Error;
 use std::cell::UnsafeCell;
 use std::sync::Arc;
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 use crate::mainloop_windows::*;
 
-#[cfg(linux)]
+#[cfg(target_os = "linux")]
 use crate::mainloop_linux::*;
 
-#[allow(dead_code)]
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 pub struct EvtMain {
 	ptr :MainLoopWindows,
 }
 
 
-#[allow(dead_code)]
-#[cfg(linux)]
+#[cfg(target_os = "linux")]
 pub struct EvtMain {
 	ptr :MainLoopLinux,
 }
 
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 impl EvtMain {
-	#[cfg(windows)]
 	pub fn new() -> Result<Self,Box<dyn Error>> {
 		Ok(Self {
 			ptr :MainLoopWindows::new()?,
@@ -40,8 +37,8 @@ impl EvtMain {
 		return self.ptr.add_timer(bv,interval,conti);
 	}
 
-	pub fn add_event(&mut self,bv :Arc<UnsafeCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
-		return self.ptr.add_event(bv);
+	pub fn add_event(&mut self,bv :Arc<UnsafeCell<dyn EvtCall>>, eventtype :u32) -> Result<(),Box<dyn Error>> {
+		return self.ptr.add_event(bv,eventtype);
 	}
 
 	pub fn remove_timer(&mut self,bv :Arc<UnsafeCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
@@ -61,7 +58,7 @@ impl EvtMain {
 	}
 }
 
-#[cfg(linux)]
+#[cfg(target_os = "linux")]
 impl EvtMain {
 	pub fn new() -> Result<Self,Box<dyn Error>> {
 		Ok(Self {

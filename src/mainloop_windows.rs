@@ -48,7 +48,7 @@ impl MainLoopWindows {
 		Ok(())
 	}
 
-	pub fn add_event(&mut self,_bv :Arc<UnsafeCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
+	pub fn add_event(&mut self,_bv :Arc<UnsafeCell<dyn EvtCall>>, _eventtype :u32) -> Result<(),Box<dyn Error>> {
 		Ok(())
 	}
 

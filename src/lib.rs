@@ -1,9 +1,9 @@
 
 
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 pub (crate) mod mainloop_windows;
 
-#[cfg(linux)]
+#[cfg(target_os = "linux")]
 pub (crate) mod mainloop_linux;
 
 pub mod mainloop;
