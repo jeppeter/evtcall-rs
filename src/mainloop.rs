@@ -33,7 +33,7 @@ impl EvtMain {
 
 
 impl EvtMain {
-	pub fn add_timer(&mut self,bv :Arc<UnsafeCell<dyn EvtTimer>>,interval:i32,conti:bool) -> Result<(),Box<dyn Error>> {
+	pub fn add_timer(&mut self,bv :Arc<UnsafeCell<dyn EvtTimer>>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
 		return self.ptr.add_timer(bv,interval,conti);
 	}
 
@@ -41,8 +41,8 @@ impl EvtMain {
 		return self.ptr.add_event(bv,eventtype);
 	}
 
-	pub fn remove_timer(&mut self,bv :Arc<UnsafeCell<dyn EvtTimer>>) -> Result<(),Box<dyn Error>> {
-		return self.ptr.remove_timer(bv);
+	pub fn remove_timer(&mut self,guid:u64) -> Result<(),Box<dyn Error>> {
+		return self.ptr.remove_timer(guid);
 	}
 
 	pub fn remove_event(&mut self,bv :Arc<UnsafeCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
