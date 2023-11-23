@@ -1,7 +1,6 @@
 
 use crate::interface::*;
 use std::error::Error;
-use std::cell::UnsafeCell;
 use std::sync::Arc;
 
 #[cfg(target_os = "windows")]
@@ -31,21 +30,30 @@ impl EvtMain {
 	}
 }
 
+#[cfg(target_os = "linux")]
+impl EvtMain {
+	pub fn new() -> Result<Self,Box<dyn Error>> {
+		Ok(Self {
+			ptr :MainLoopLinux::new()?,
+		})
+	}
+}
+
 
 impl EvtMain {
-	pub fn add_timer(&mut self,bv :Arc<UnsafeCell<dyn EvtTimer>>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
+	pub fn add_timer(&mut self,bv :Arc<*mut dyn EvtTimer>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
 		return self.ptr.add_timer(bv,interval,conti);
 	}
 
-	pub fn add_event(&mut self,bv :Arc<UnsafeCell<dyn EvtCall>>, eventtype :u32) -> Result<(),Box<dyn Error>> {
-		return self.ptr.add_event(bv,eventtype);
+	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>) -> Result<(),Box<dyn Error>> {
+		return self.ptr.add_event(bv);
 	}
 
 	pub fn remove_timer(&mut self,guid:u64) -> Result<(),Box<dyn Error>> {
 		return self.ptr.remove_timer(guid);
 	}
 
-	pub fn remove_event(&mut self,bv :Arc<UnsafeCell<dyn EvtCall>>) -> Result<(),Box<dyn Error>> {
+	pub fn remove_event(&mut self,bv :Arc<*mut dyn EvtCall>) -> Result<(),Box<dyn Error>> {
 		return self.ptr.remove_event(bv);
 	}
 
@@ -56,14 +64,12 @@ impl EvtMain {
 	pub fn break_up(&mut self) -> Result<(),Box<dyn Error>> {
 		return self.ptr.break_up();
 	}
-}
 
-#[cfg(target_os = "linux")]
-impl EvtMain {
-	pub fn new() -> Result<Self,Box<dyn Error>> {
-		Ok(Self {
-			ptr :MainLoopLinux::new()?,
-		})
+	pub fn reset_all(&mut self) {
+		return self.ptr.reset_all();
 	}
 }
+
+
+
 
