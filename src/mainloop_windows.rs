@@ -7,10 +7,10 @@ use std::error::Error;
 
 
 #[allow(dead_code)]
-pub struct MainLoopWindows {
+pub struct EvtMain {
 }
 
-impl MainLoopWindows {
+impl EvtMain {
 	pub fn new() -> Result<Self,Box<dyn Error>> {
 		Ok(Self {
 		})

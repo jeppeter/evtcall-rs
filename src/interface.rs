@@ -1,6 +1,13 @@
 
-use crate::mainloop::*;
+//use crate::mainloop::*;
 use std::error::Error;
+
+#[cfg(target_os = "linux")]
+use crate::mainloop_linux::*;
+
+#[cfg(target_os = "windows")]
+use crate::mainloop_windows::*;
+
 
 pub trait EvtCall {
 	fn get_evt(&self) -> u64;
