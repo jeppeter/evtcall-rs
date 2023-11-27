@@ -1,4 +1,8 @@
 
+
+#[macro_use]
+pub mod errors;
+
 mod timeop;
 
 #[cfg(target_os = "windows")]

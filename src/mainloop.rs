@@ -23,18 +23,18 @@ pub struct EvtMain {
 
 #[cfg(target_os = "windows")]
 impl EvtMain {
-	pub fn new() -> Result<Self,Box<dyn Error>> {
+	pub fn new(flags :u32) -> Result<Self,Box<dyn Error>> {
 		Ok(Self {
-			ptr :MainLoopWindows::new()?,
+			ptr :MainLoopWindows::new(flags)?,
 		})
 	}
 }
 
 #[cfg(target_os = "linux")]
 impl EvtMain {
-	pub fn new() -> Result<Self,Box<dyn Error>> {
+	pub fn new(flags :u32) -> Result<Self,Box<dyn Error>> {
 		Ok(Self {
-			ptr :MainLoopLinux::new()?,
+			ptr :MainLoopLinux::new(flags)?,
 		})
 	}
 }
