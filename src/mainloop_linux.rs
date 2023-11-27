@@ -1,27 +1,19 @@
 
 
+use crate::consts::*;
 use crate::interface::*;
+use crate::timeop::*;
 use std::sync::Arc;
 use std::error::Error;
 #[allow(unused_imports)]
 use std::collections::HashMap;
-use libc::{clock_gettime,CLOCK_MONOTONIC_COARSE,timespec,c_int};
+//use libc::{clock_gettime,CLOCK_MONOTONIC_COARSE,timespec,c_int};
+use libc::{c_int};
 
 use super::{evtcall_error_class,evtcall_new_error};
 
 evtcall_error_class!{MainLoopLinuxError}
 
-fn get_cur_ticks() -> u64 {
-	let mut  curtime = timespec {
-		tv_sec : 0,
-		tv_nsec : 0,
-	};
-	unsafe {clock_gettime(CLOCK_MONOTONIC_COARSE,&mut curtime);};
-	let mut retmills : u64 = 0;
-	retmills += (curtime.tv_sec as u64 )  * 1000;
-	retmills += ((curtime.tv_nsec as u64) % 1000000000) / 1000000;
-	return retmills;
-}
 
 struct EvtCallLinux {
 	evt :Arc<*mut dyn EvtCall>,
@@ -95,10 +87,35 @@ impl MainLoopLinux {
 
 	#[allow(unused_variables)]
 	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>) -> Result<(),Box<dyn Error>> {
-
 		let evtid :u64 ;
 		let b = Arc::as_ptr(&bv);
-		unsafe { evtid = (&(*(*b))).get_evt();}
+		unsafe {
+			evtid = (&(*(*b))).get_evt();
+			let evttype = (&(*(*b))).get_evttype();
+			let mut optype :u32 = 0;
+			if (evttype & READ_EVENT) != 0 {
+				optype |= libc::EPOLLIN as u32;
+			}
+			if (evttype & WRITE_EVENT) != 0 {
+				optype |= libc::EPOLLOUT as u32;
+			}
+			if (evttype & ERROR_EVENT) != 0 {
+				optype |= libc::EPOLLERR as u32;
+			}
+			if (evttype & ET_TRIGGER) != 0 {
+				optype |= libc::EPOLLET as u32;
+			}
+			let mut evt :libc::epoll_event = libc::epoll_event {
+				events : optype,
+				u64 : evtid,
+			};
+	
+			let retv = libc::epoll_ctl(self.epollfd,libc::EPOLL_CTL_ADD,evtid as i32,&mut evt);
+			if retv < 0 {
+				evtcall_new_error!{MainLoopLinuxError,"can not EPOLL_ADD error [{}]",retv}
+			}
+		}
+
 		let ev = EvtCallLinux::new(bv)?;
 		self.guid += 1;
 		self.evtmaps.insert(self.guid,ev);
@@ -113,7 +130,48 @@ impl MainLoopLinux {
 
 	#[allow(unused_variables)]
 	pub fn remove_event(&mut self,bv :Arc<*mut dyn EvtCall>) -> Result<(),Box<dyn Error>> {
-		unimplemented!()
+		let evtid :u64;
+		let b = Arc::as_ptr(&bv);
+		unsafe {
+			evtid = (&(*(*b))).get_evt();
+			let evttype = (&(*(*b))).get_evttype();
+			let mut optype :u32 = 0;
+			if (evttype & READ_EVENT) != 0 {
+				optype |= libc::EPOLLIN as u32;
+			}
+			if (evttype & WRITE_EVENT) != 0 {
+				optype |= libc::EPOLLOUT as u32;
+			}
+			if (evttype & ERROR_EVENT) != 0 {
+				optype |= libc::EPOLLERR as u32;
+			}
+			if (evttype & ET_TRIGGER) != 0 {
+				optype |= libc::EPOLLET as u32;
+			}
+			let mut evt :libc::epoll_event = libc::epoll_event {
+				events : optype,
+				u64 : evtid,
+			};
+	
+			let retv = libc::epoll_ctl(self.epollfd,libc::EPOLL_CTL_DEL,evtid as i32,&mut evt);
+			if retv < 0 {
+				evtcall_new_error!{MainLoopLinuxError,"can not EPOLL_ADD error [{}]",retv}
+			}
+		}
+
+		let curguid :u64;
+		match self.guidevtmaps.get(&evtid) {
+			Some(_v) => {
+				curguid = *_v;
+			},
+			None => {
+				evtcall_new_error!{MainLoopLinuxError,"cannot found 0x{:x} evtid",evtid}
+			}
+		}
+
+		self.guidevtmaps.remove(&evtid);
+		self.evtmaps.remove(&curguid);
+		Ok(())
 	}
 
 	#[allow(unused_variables)]
