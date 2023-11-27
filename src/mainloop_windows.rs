@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use crate::timeop::*;
 use crate::consts::*;
 
-use winapi::um::winnt::{HANDLE};
+use winapi::um::winnt::{HANDLE,STATUS_WAIT_0};
 use winapi::um::synchapi::{WaitForMultipleObjectsEx};
-use winapi::shared::miniwindef::{FALSE,DWORD};
+use winapi::shared::minwindef::{FALSE,DWORD};
 
 use super::{evtcall_error_class,evtcall_new_error};
 
@@ -180,13 +180,13 @@ impl EvtMain {
 			let dret :DWORD;
 
 			unsafe {
-				dret = WaitForMultipleObjectsEx(handles.len(),handles.as_ptr(),FALSE,timeout,FALSE);
+				dret = WaitForMultipleObjectsEx(handles.len() as DWORD,handles.as_ptr(),FALSE,timeout,FALSE);
 			}
 
 			let timeguids = self.get_time_guids();
 
-			if dret >= 0 && dret < handles.len() {
-				let curguid = guids[dret];
+			if dret >= STATUS_WAIT_0 && dret < ( STATUS_WAIT_0 + (handles.len() as DWORD)) {
+				let curguid = guids[(dret as usize) - (STATUS_WAIT_0 as usize)];
 				let mut findev :Option<EvtCallWindows> = None;
 				match self.evtmaps.get(&curguid) {
 					Some(ev) => {
