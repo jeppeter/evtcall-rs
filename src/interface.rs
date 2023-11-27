@@ -1,5 +1,5 @@
 
-//use crate::mainloop::*;
+//use crate::mainloop::EvtMain;
 use std::error::Error;
 
 #[cfg(target_os = "linux")]

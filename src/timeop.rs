@@ -2,6 +2,9 @@
 #[cfg(target_os = "linux")]
 use libc::{clock_gettime,CLOCK_MONOTONIC_COARSE,timespec};
 
+#[cfg(target_os = "windows")]
+use winapi::um::sysinfoapi::*;
+
 const MAX_U64_VAL :u64 = 0xffffffffffffffff;
 
 #[cfg(target_os = "linux")]
@@ -15,6 +18,15 @@ pub (crate) fn get_cur_ticks() -> u64 {
 	retmills += (curtime.tv_sec as u64 )  * 1000;
 	retmills += ((curtime.tv_nsec as u64) % 1000000000) / 1000000;
 	return retmills;
+}
+
+#[cfg(target_os = "windows")]
+pub (crate) fn get_cur_ticks() -> u64 {
+	let retv :u64;
+	unsafe {
+		retv = GetTickCount64() as u64;
+	}
+	return retv;
 }
 
 

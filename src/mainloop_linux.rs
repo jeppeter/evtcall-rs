@@ -5,7 +5,6 @@ use crate::interface::*;
 use crate::timeop::*;
 use std::sync::Arc;
 use std::error::Error;
-#[allow(unused_imports)]
 use std::collections::HashMap;
 //use libc::{clock_gettime,CLOCK_MONOTONIC_COARSE,timespec,c_int};
 use libc::{c_int};
