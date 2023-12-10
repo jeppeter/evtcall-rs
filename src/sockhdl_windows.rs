@@ -10,8 +10,41 @@ use std::error::Error;
 evtcall_error_class!{SockHandleError}
 
 #[allow(dead_code)]
-pub struct SockHandle {
+enum SockType {
+	SockNoneType,
+	SockClientType,
+	SockServerType,
+}
 
+#[allow(dead_code)]
+pub struct SockHandle {
+	mtype : SockType,
+}
+
+impl Drop for SockHandle {
+	fn drop(&mut self) {
+		self.free();
+	}
+}
+
+impl SockHandle {
+	pub fn free(&mut self) {
+
+		match self.mtype {
+			SockType::SockClientType => {
+
+			},
+			SockType::SockServerType => {
+
+			},
+			SockType::SockNoneType => {
+
+			},
+		}
+
+
+		return;
+	}
 }
 
 #[allow(dead_code)]
@@ -55,3 +88,4 @@ pub fn fini_socket()  {
 		WSACleanup();
 	}
 }
+
