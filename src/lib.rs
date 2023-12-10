@@ -3,6 +3,7 @@
 pub mod consts;
 #[macro_use]
 pub mod errors;
+pub (crate) mod logger;
 mod timeop;
 
 #[cfg(target_os = "windows")]

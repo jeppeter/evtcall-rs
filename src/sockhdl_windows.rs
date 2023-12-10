@@ -1,11 +1,15 @@
 
+use winapi::um::winnt::{HANDLE};
 use winapi::um::winsock2::{WSAStartup,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSACleanup};
-use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE};
+use winapi::um::ioapiset::{CancelIoEx};
+use winapi::um::minwinbase::{OVERLAPPED};
+use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL};
 use winapi::ctypes::{c_int};
 
 use super::{evtcall_error_class,evtcall_new_error};
 use std::error::Error;
-
+use crate::logger::*;
+use crate::*;
 
 evtcall_error_class!{SockHandleError}
 
@@ -19,6 +23,9 @@ enum SockType {
 #[allow(dead_code)]
 pub struct SockHandle {
 	mtype : SockType,
+	inconn : i32,
+	sock : HANDLE,
+	connov :OVERLAPPED,
 }
 
 impl Drop for SockHandle {
@@ -29,10 +36,17 @@ impl Drop for SockHandle {
 
 impl SockHandle {
 	pub fn free(&mut self) {
-
+		let bret :BOOL;
 		match self.mtype {
 			SockType::SockClientType => {
-
+				if self.inconn > 0 {
+					unsafe {
+						bret = CancelIoEx(self.sock,&mut self.connov);
+					}
+					if bret == 0 {
+						evtcall_log_trace!("can not CancelIoEx connov");
+					}
+				}
 			},
 			SockType::SockServerType => {
 
