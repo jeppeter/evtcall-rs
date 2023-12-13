@@ -2,8 +2,9 @@
 use winapi::um::winnt::{HANDLE};
 use winapi::um::winsock2::{WSAStartup,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSACleanup};
 use winapi::um::ioapiset::{CancelIoEx};
+use winapi::um::errhandlingapi::{GetLastError};
 use winapi::um::minwinbase::{OVERLAPPED};
-use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL};
+use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD};
 use winapi::ctypes::{c_int};
 
 use super::{evtcall_error_class,evtcall_new_error};
@@ -26,6 +27,12 @@ pub struct SockHandle {
 	inconn : i32,
 	sock : HANDLE,
 	connov :OVERLAPPED,
+	inrd :i32,
+	rdov :OVERLAPPED,
+	inwr :i32,
+	wrov :OVERLAPPED,
+	inacc :i32,
+	accov :OVERLAPPED,
 }
 
 impl Drop for SockHandle {
@@ -36,7 +43,8 @@ impl Drop for SockHandle {
 
 impl SockHandle {
 	pub fn free(&mut self) {
-		let bret :BOOL;
+		let mut bret :BOOL;
+		let mut errval :DWORD;
 		match self.mtype {
 			SockType::SockClientType => {
 				if self.inconn > 0 {
@@ -44,17 +52,58 @@ impl SockHandle {
 						bret = CancelIoEx(self.sock,&mut self.connov);
 					}
 					if bret == 0 {
-						evtcall_log_trace!("can not CancelIoEx connov");
+						unsafe {
+							errval = GetLastError();
+						}
+						evtcall_log_error!("can not CancelIoEx connov {}",errval);
 					}
 				}
+				self.inconn = 0;
 			},
 			SockType::SockServerType => {
-
+				if self.inacc > 0 {
+					unsafe {
+						bret = CancelIoEx(self.sock,&mut self.accov);
+					}
+					if bret == 0 {
+						unsafe {
+							errval = GetLastError();
+						}
+						evtcall_log_error!("cannot CancelIoEx accov error {}",errval);
+					}
+				}
+				self.inacc = 0;
 			},
 			SockType::SockNoneType => {
 
 			},
 		}
+
+		if self.inrd > 0 {
+			unsafe {
+				bret = CancelIoEx(self.sock,&mut self.rdov);
+			}
+			if bret == 0 {
+				unsafe {
+					errval = GetLastError();
+				}
+				evtcall_log_error!("cannot CancelIoEx rdov error {}",errval);
+			}
+		}
+		self.inrd = 0;
+
+		if self.inwr > 0 {
+			unsafe {
+				bret = CancelIoEx(self.sock,&mut self.wrov);
+			}
+			if bret == 0 {
+				unsafe {
+					errval = GetLastError();
+				}
+				evtcall_log_error!("cannot CancelIoEx wrov error {}",errval);
+			}
+		}
+		self.inwr = 0;
 
 
 		return;
