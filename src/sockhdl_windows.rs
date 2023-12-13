@@ -1,13 +1,16 @@
 
 use winapi::um::winnt::{HANDLE};
-use winapi::um::winsock2::{WSAStartup,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSACleanup};
+//use winapi::um::winsock2::{WSAStartup,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSACleanup,socket,SOCKET,closesocket,INVALID_SOCKET,SOCKET_ERROR,SOCK_STREAM,PF_INET,ioctlsocket,u_long};
+use winapi::um::winsock2::*;
 use winapi::um::ioapiset::{CancelIoEx};
-use winapi::um::errhandlingapi::{GetLastError};
+use winapi::um::errhandlingapi::{GetLastError,SetLastError};
 use winapi::um::minwinbase::{OVERLAPPED};
+use winapi::um::handleapi::{CloseHandle};
 use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD};
 use winapi::ctypes::{c_int};
 
 use super::{evtcall_error_class,evtcall_new_error};
+use super::consts_windows::{NULL_HANDLE_VALUE};
 use std::error::Error;
 use crate::logger::*;
 use crate::*;
@@ -25,7 +28,7 @@ enum SockType {
 pub struct SockHandle {
 	mtype : SockType,
 	inconn : i32,
-	sock : HANDLE,
+	sock : SOCKET,
 	connov :OVERLAPPED,
 	inrd :i32,
 	rdov :OVERLAPPED,
@@ -41,73 +44,164 @@ impl Drop for SockHandle {
 	}
 }
 
+macro_rules! get_errno {
+	() => {{
+		let mut retv :i32 ;
+		unsafe {
+			retv = GetLastError() as i32;
+		}
+		if retv != 0 {
+			retv = -retv;
+		} else {
+			retv = -1;
+		}
+		retv
+	}};
+}
+
+macro_rules! set_errno {
+	($val :expr) => {
+		unsafe {
+			SetLastError($val as DWORD);
+		}
+	};
+}
+
+macro_rules! close_handle_safe {
+	($hdval : expr,$name :expr) => {
+		let _bret :BOOL;
+		let _errval :i32;
+		if $hdval != NULL_HANDLE_VALUE {
+			unsafe {
+				_bret = CloseHandle($hdval);
+			}
+			if _bret == 0 {
+				_errval = get_errno!();
+				evtcall_log_error!("CloseHandle {} error {}",$name,_errval);
+			}
+		}
+		$hdval = NULL_HANDLE_VALUE;
+	};
+}
+
+macro_rules! close_socket_safe {
+	($sockval :expr , $name :expr) => {
+		let _errval :i32;
+		let _iret :c_int;
+
+		if $sockval != INVALID_SOCKET {
+			unsafe {
+				_iret = closesocket($sockval);
+			}
+
+			if _iret == SOCKET_ERROR {
+				_errval = get_errno!();
+				evtcall_log_error!("close {} error {}",$name,_errval);
+			}
+		}
+		$sockval = INVALID_SOCKET;
+	};
+}
+
+macro_rules! new_ov {
+	() => { {
+		let c :OVERLAPPED = unsafe {std::mem::zeroed()};
+		c
+	}};
+}
+
+macro_rules! cancel_io_safe {
+	($val :expr,$hdval :expr, $ovval :expr , $name :expr) => {
+		let _bret :BOOL;
+		let _errval :DWORD;
+		if $val > 0 {
+			unsafe {
+				_bret = CancelIoEx($hdval as HANDLE,&mut $ovval);
+			}
+			if _bret == 0 {
+				unsafe {
+					_errval = GetLastError();
+				}
+				evtcall_log_error!("CancelIoEx {} error {}",$name,_errval);
+			}
+		}
+		$val = 0;
+	};
+}
+
 impl SockHandle {
 	pub fn free(&mut self) {
-		let mut bret :BOOL;
-		let mut errval :DWORD;
 		match self.mtype {
 			SockType::SockClientType => {
-				if self.inconn > 0 {
-					unsafe {
-						bret = CancelIoEx(self.sock,&mut self.connov);
-					}
-					if bret == 0 {
-						unsafe {
-							errval = GetLastError();
-						}
-						evtcall_log_error!("can not CancelIoEx connov {}",errval);
-					}
-				}
-				self.inconn = 0;
+				cancel_io_safe!(self.inconn,self.sock,self.connov,"connov");
+				close_handle_safe!(self.connov.hEvent,"connov handle");
 			},
 			SockType::SockServerType => {
-				if self.inacc > 0 {
-					unsafe {
-						bret = CancelIoEx(self.sock,&mut self.accov);
-					}
-					if bret == 0 {
-						unsafe {
-							errval = GetLastError();
-						}
-						evtcall_log_error!("cannot CancelIoEx accov error {}",errval);
-					}
-				}
-				self.inacc = 0;
+				cancel_io_safe!(self.inacc,self.sock,self.accov,"accov");
+				close_handle_safe!(self.accov.hEvent,"accov handle");
 			},
 			SockType::SockNoneType => {
 
 			},
 		}
 
-		if self.inrd > 0 {
-			unsafe {
-				bret = CancelIoEx(self.sock,&mut self.rdov);
-			}
-			if bret == 0 {
-				unsafe {
-					errval = GetLastError();
-				}
-				evtcall_log_error!("cannot CancelIoEx rdov error {}",errval);
-			}
-		}
-		self.inrd = 0;
+		cancel_io_safe!(self.inrd,self.sock,self.rdov,"rdov");
+		close_handle_safe!(self.rdov.hEvent,"rdov handle");
 
-		if self.inwr > 0 {
-			unsafe {
-				bret = CancelIoEx(self.sock,&mut self.wrov);
-			}
-			if bret == 0 {
-				unsafe {
-					errval = GetLastError();
-				}
-				evtcall_log_error!("cannot CancelIoEx wrov error {}",errval);
-			}
-		}
-		self.inwr = 0;
+		cancel_io_safe!(self.inwr,self.sock,self.wrov,"wrov");
+		close_handle_safe!(self.wrov.hEvent,"wrov handle");
 
+		close_socket_safe!(self.sock,"sock handle");
 
 		return;
 	}
+
+	#[allow(dead_code)]
+	#[allow(unused_variables)]
+	#[allow(unused_mut)]
+	pub fn bind_server(ipaddr :&str,port :u32,connected :bool) -> Result<Self,Box<dyn Error>> {
+		let mut retv :Self = Self {
+			mtype : SockType::SockServerType,
+			sock : INVALID_SOCKET,
+			inconn : 0,
+			connov : new_ov!(),
+			inacc : 0,
+			accov : new_ov!(),
+			inrd : 0,
+			rdov : new_ov!(),
+			inwr : 0,
+			wrov : new_ov!(),
+		};
+		let mut ret :i32;
+		let mut iret :c_int;
+		let mut block :u_long;
+
+		unsafe {
+			retv.sock = socket(PF_INET,SOCK_STREAM,0);
+		}
+
+		if retv.sock == INVALID_SOCKET {
+			ret = get_errno!();
+			retv.free();
+			evtcall_new_error!{SockHandleError,"cannot socket error {}",ret}
+		}
+
+		block = 1;
+		unsafe {
+			iret = ioctlsocket(retv.sock,FIONBIO,&mut block);
+		}
+
+		if iret == SOCKET_ERROR {
+			ret = get_errno!();
+			retv.free();
+			evtcall_new_error!{SockHandleError,"cannot set non-block error {}",ret}
+		}
+
+
+		Ok(retv)
+	}
+
+
 }
 
 #[allow(dead_code)]
