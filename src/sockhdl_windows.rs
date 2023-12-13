@@ -1,12 +1,16 @@
 
-use winapi::um::winnt::{HANDLE};
+use winapi::um::winnt::{HANDLE,PVOID,LPCWSTR};
 //use winapi::um::winsock2::{WSAStartup,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSACleanup,socket,SOCKET,closesocket,INVALID_SOCKET,SOCKET_ERROR,SOCK_STREAM,PF_INET,ioctlsocket,u_long};
 use winapi::um::winsock2::*;
+use winapi::shared::ws2def::*;
+use winapi::shared::inaddr::*;
+use winapi::um::ws2tcpip::*;
+use winapi::um::synchapi::*;
 use winapi::um::ioapiset::{CancelIoEx};
 use winapi::um::errhandlingapi::{GetLastError,SetLastError};
-use winapi::um::minwinbase::{OVERLAPPED};
+use winapi::um::minwinbase::{OVERLAPPED,LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES};
 use winapi::um::handleapi::{CloseHandle};
-use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD};
+use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD,TRUE,FALSE};
 use winapi::ctypes::{c_int};
 
 use super::{evtcall_error_class,evtcall_new_error};
@@ -110,6 +114,20 @@ macro_rules! new_ov {
 	}};
 }
 
+macro_rules! create_event_safe {
+	($hd :expr,$freval :expr,$name :expr) => {
+		let _errval :i32;
+		let _pattr :LPSECURITY_ATTRIBUTES = std::ptr::null_mut::<SECURITY_ATTRIBUTES>() as LPSECURITY_ATTRIBUTES;
+		let _pstr :LPCWSTR = std::ptr::null() as LPCWSTR;
+		$hd = unsafe {CreateEventW(_pattr,TRUE,FALSE,_pstr)};
+		if $hd == NULL_HANDLE_VALUE {
+			_errval = get_errno!();
+			$freval.free();
+			evtcall_new_error!{SockHandleError,"create {} error {}",$name,_errval}
+		}
+	};
+}
+
 macro_rules! cancel_io_safe {
 	($val :expr,$hdval :expr, $ovval :expr , $name :expr) => {
 		let _bret :BOOL;
@@ -159,7 +177,7 @@ impl SockHandle {
 	#[allow(dead_code)]
 	#[allow(unused_variables)]
 	#[allow(unused_mut)]
-	pub fn bind_server(ipaddr :&str,port :u32,connected :bool) -> Result<Self,Box<dyn Error>> {
+	pub fn bind_server(ipaddr :&str,port :u32,localip :&str,localport :u32,connected :bool) -> Result<Self,Box<dyn Error>> {
 		let mut retv :Self = Self {
 			mtype : SockType::SockServerType,
 			sock : INVALID_SOCKET,
@@ -175,9 +193,11 @@ impl SockHandle {
 		let mut ret :i32;
 		let mut iret :c_int;
 		let mut block :u_long;
+		let mut name :SOCKADDR_IN = unsafe {std::mem::zeroed()};
+		let namelen :c_int;
 
 		unsafe {
-			retv.sock = socket(PF_INET,SOCK_STREAM,0);
+			retv.sock = socket(AF_INET,winapi::shared::ws2def::SOCK_STREAM,0);
 		}
 
 		if retv.sock == INVALID_SOCKET {
@@ -196,6 +216,36 @@ impl SockHandle {
 			retv.free();
 			evtcall_new_error!{SockHandleError,"cannot set non-block error {}",ret}
 		}
+
+		name.sin_family = AF_INET as u16;
+		if localip.len() != 0 {
+			let pv : PVOID = ((&mut name.sin_addr) as * mut IN_ADDR) as PVOID;
+			unsafe {
+				inet_pton(winapi::shared::ws2def::SOCK_STREAM,localip.as_bytes().as_ptr() as * const i8,pv);
+			}
+		} else {
+			name.sin_addr = unsafe {std::mem::zeroed()};
+		}
+
+		if localport != 0 {
+			name.sin_port = unsafe {htons(localport as u16)};	
+		} else {
+			name.sin_port = 0;
+		}
+
+		namelen = std::mem::size_of::<SOCKADDR_IN>() as c_int;
+		unsafe {
+			let pv :*const SOCKADDR = (&name as *const SOCKADDR_IN) as *const SOCKADDR;
+			iret = bind(retv.sock,pv, namelen);
+		}
+
+		if iret == SOCKET_ERROR {
+			ret = get_errno!();
+			retv.free();
+			evtcall_new_error!{SockHandleError,"bind [{}:{}] error {}",localip,localport,ret}
+		}
+
+		create_event_safe!(retv.connov.hEvent,retv,"connov handle");		
 
 
 		Ok(retv)
@@ -227,7 +277,7 @@ pub fn init_socket() -> Result<(),Box<dyn Error>> {
 			WSACleanup();
 		}
 		evtcall_new_error!{SockHandleError,"cannot WSAStartup {}",ret}
-	}
+	} 
 
 	if LOBYTE(wsdata.wVersion) != 2 || HIBYTE(wsdata.wVersion) != 2 {
 		unsafe {
