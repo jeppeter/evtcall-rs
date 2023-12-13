@@ -2,16 +2,18 @@
 use winapi::um::winnt::{HANDLE,PVOID,LPCWSTR};
 //use winapi::um::winsock2::{WSAStartup,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSACleanup,socket,SOCKET,closesocket,INVALID_SOCKET,SOCKET_ERROR,SOCK_STREAM,PF_INET,ioctlsocket,u_long};
 use winapi::um::winsock2::*;
+use winapi::um::mswsock::{LPFN_CONNECTEX,WSAID_CONNECTEX};
 use winapi::shared::ws2def::*;
 use winapi::shared::inaddr::*;
+use winapi::shared::guiddef::{GUID};
 use winapi::um::ws2tcpip::*;
 use winapi::um::synchapi::*;
 use winapi::um::ioapiset::{CancelIoEx};
 use winapi::um::errhandlingapi::{GetLastError,SetLastError};
-use winapi::um::minwinbase::{OVERLAPPED,LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES};
+use winapi::um::minwinbase::{OVERLAPPED,LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES,LPOVERLAPPED};
 use winapi::um::handleapi::{CloseHandle};
-use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD,TRUE,FALSE};
-use winapi::ctypes::{c_int};
+use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD,TRUE,FALSE,LPVOID,LPDWORD};
+use winapi::ctypes::{c_int,c_void};
 
 use super::{evtcall_error_class,evtcall_new_error};
 use super::consts_windows::{NULL_HANDLE_VALUE};
@@ -40,6 +42,7 @@ pub struct SockHandle {
 	wrov :OVERLAPPED,
 	inacc :i32,
 	accov :OVERLAPPED,
+	acceptfunc : LPFN_CONNECTEX,
 }
 
 impl Drop for SockHandle {
@@ -79,7 +82,7 @@ macro_rules! close_handle_safe {
 			unsafe {
 				_bret = CloseHandle($hdval);
 			}
-			if _bret == 0 {
+			if _bret == FALSE {
 				_errval = get_errno!();
 				evtcall_log_error!("CloseHandle {} error {}",$name,_errval);
 			}
@@ -178,6 +181,9 @@ impl SockHandle {
 	#[allow(unused_variables)]
 	#[allow(unused_mut)]
 	pub fn bind_server(ipaddr :&str,port :u32,localip :&str,localport :u32,connected :bool) -> Result<Self,Box<dyn Error>> {
+		if ipaddr.len() == 0 || port == 0 {
+			evtcall_new_error!{SockHandleError,"not valid ipaddr [{}] or port [{}]",ipaddr,port}
+		}
 		let mut retv :Self = Self {
 			mtype : SockType::SockServerType,
 			sock : INVALID_SOCKET,
@@ -189,12 +195,18 @@ impl SockHandle {
 			rdov : new_ov!(),
 			inwr : 0,
 			wrov : new_ov!(),
+			acceptfunc : None,
 		};
 		let mut ret :i32;
 		let mut iret :c_int;
 		let mut block :u_long;
 		let mut name :SOCKADDR_IN = unsafe {std::mem::zeroed()};
 		let namelen :c_int;
+		let accguid:GUID = WSAID_CONNECTEX;
+		let mut dret :DWORD = 0;
+		let mut bret :BOOL;
+
+
 
 		unsafe {
 			retv.sock = socket(AF_INET,winapi::shared::ws2def::SOCK_STREAM,0);
@@ -221,7 +233,7 @@ impl SockHandle {
 		if localip.len() != 0 {
 			let pv : PVOID = ((&mut name.sin_addr) as * mut IN_ADDR) as PVOID;
 			unsafe {
-				inet_pton(winapi::shared::ws2def::SOCK_STREAM,localip.as_bytes().as_ptr() as * const i8,pv);
+				inet_pton(AF_INET,localip.as_bytes().as_ptr() as * const i8,pv);
 			}
 		} else {
 			name.sin_addr = unsafe {std::mem::zeroed()};
@@ -245,7 +257,57 @@ impl SockHandle {
 			evtcall_new_error!{SockHandleError,"bind [{}:{}] error {}",localip,localport,ret}
 		}
 
-		create_event_safe!(retv.connov.hEvent,retv,"connov handle");		
+		create_event_safe!(retv.connov.hEvent,retv,"connov handle");
+
+		name = unsafe {std::mem::zeroed()};
+		name.sin_family = AF_INET as u16;
+		{
+			let pv : PVOID = ((&mut name.sin_addr) as * mut IN_ADDR) as PVOID;
+			unsafe {
+				inet_pton(AF_INET,ipaddr.as_bytes().as_ptr() as * const i8,pv);
+			}
+		}
+		name.sin_port = unsafe {htons(port as u16)};
+
+		unsafe {
+			let _funcptr :LPVOID = (&mut retv.acceptfunc as *mut LPFN_CONNECTEX ) as LPVOID;
+			let _funcsize:DWORD = std::mem::size_of::<LPFN_CONNECTEX>() as DWORD;
+			let _guidptr :LPVOID = (&accguid as *const GUID) as LPVOID;
+			let _guidsize :DWORD = std::mem::size_of::<GUID>() as DWORD;
+			let _retptr :LPDWORD = &mut dret;
+			let _ptrov :LPWSAOVERLAPPED = std::ptr::null::<WSAOVERLAPPED>() as LPWSAOVERLAPPED;
+			let _fncall :LPWSAOVERLAPPED_COMPLETION_ROUTINE = None;
+			iret = WSAIoctl(retv.sock,SIO_GET_EXTENSION_FUNCTION_POINTER,_guidptr,_guidsize,_funcptr,_funcsize,_retptr,_ptrov,_fncall);
+		}
+
+		if iret != 0 {
+			iret = get_errno!();
+			retv.free();
+			evtcall_new_error!{SockHandleError,"cannot get WSAIoctl error {}",iret}
+		}
+
+		if retv.acceptfunc.is_none() {
+			retv.free();
+			evtcall_new_error!{SockHandleError,"cannot get acceptfunc"}
+		}
+		{
+			let _nameptr :*const SOCKADDR = (&name as *const SOCKADDR_IN) as * const SOCKADDR;
+			let _namelen :c_int = std::mem::size_of::<SOCKADDR_IN>() as c_int;
+			let _sendbuf :LPVOID = std::ptr::null_mut::<c_void>();
+			let _sndsize :DWORD = 0;
+			let _retsend :LPDWORD = &mut dret;
+			let _connovptr :LPOVERLAPPED = &mut retv.connov;
+			unsafe {
+				bret = retv.acceptfunc.as_ref().unwrap()(retv.sock,_nameptr,_namelen,_sendbuf,_sndsize,_retsend,_connovptr);	
+			}
+			if bret == FALSE {
+				iret = get_errno!();
+				retv.free();
+				evtcall_new_error!{SockHandleError,"call acceptfunc error {}",iret}
+			}
+		}
+
+		
 
 
 		Ok(retv)
