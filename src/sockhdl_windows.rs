@@ -1,7 +1,8 @@
 
 use winapi::um::winnt::{HANDLE,PVOID,LPCWSTR,PSTR};
-use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen,WSA_IO_PENDING,getpeername,ntohs};
-use winapi::um::mswsock::{LPFN_ACCEPTEX,WSAID_ACCEPTEX,SO_UPDATE_ACCEPT_CONTEXT};
+use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen,WSA_IO_PENDING,getpeername,ntohs,getsockname};
+use winapi::um::mswsock::{LPFN_ACCEPTEX,WSAID_ACCEPTEX,SO_UPDATE_ACCEPT_CONTEXT,LPFN_CONNECTEX,WSAID_CONNECTEX};
+
 use winapi::shared::ws2def::*;
 use winapi::shared::inaddr::*;
 use winapi::shared::guiddef::{GUID};
@@ -10,6 +11,7 @@ use winapi::um::synchapi::*;
 use winapi::um::ioapiset::{CancelIoEx,GetOverlappedResult};
 use winapi::um::errhandlingapi::{GetLastError,SetLastError};
 use winapi::um::minwinbase::{OVERLAPPED,LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES,LPOVERLAPPED};
+use winapi::um::winbase::{INFINITE,WAIT_OBJECT_0};
 use winapi::um::handleapi::{CloseHandle};
 use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD,TRUE,FALSE,LPVOID,LPDWORD};
 use winapi::ctypes::{c_int,c_char,c_void};
@@ -44,6 +46,7 @@ pub struct TcpSockHandle {
 	inacc :i32,
 	accov :OVERLAPPED,
 	acceptfunc : LPFN_ACCEPTEX,
+	connexfunc :LPFN_CONNECTEX,
 	localaddr : String,
 	localport : u32,
 	peeraddr :String,
@@ -102,6 +105,17 @@ macro_rules! get_wsa_errno {
 		retv
 	}};
 }
+
+macro_rules! get_wsa_errno_direct {
+	() => {{
+		let retv :c_int;
+		unsafe {
+			retv = WSAGetLastError();
+		}
+		retv
+	}};
+}
+
 
 macro_rules! set_errno {
 	($val :expr) => {
@@ -214,36 +228,8 @@ impl TcpSockHandle {
 		return;
 	}
 
-	fn _default_new(socktype :TcpSockType) -> Self {
-		Self {
-			mtype : socktype,
-			sock : INVALID_SOCKET,
-			accsock : INVALID_SOCKET,
-			inconn : 0,
-			connov : new_ov!(),
-			inacc : 0,
-			accov : new_ov!(),
-			inrd : 0,
-			rdov : new_ov!(),
-			inwr : 0,
-			wrov : new_ov!(),
-			acceptfunc : None,
-			localaddr : format!(""),
-			peeraddr : format!(""),
-			peerport : 0,
-			localport : 0,
-			ooaccrd : 0,
-			accrdbuf : Vec::new(),
-			oordbuf : Vec::new(),
-			oordlen : 0,
-		}
-	}
-
-	fn _bind_addr(&mut self,ipaddr :&str, port :u32) -> Result<(),Box<dyn Error>> {
-		let mut name :SOCKADDR_IN = unsafe {std::mem::zeroed()};
-		let ret :i32;
-		let iret :c_int;
-		let namelen :c_int;
+	fn _format_sockaddr_in(&self,ipaddr :&str,port :u32) -> SOCKADDR_IN {
+		let mut name :SOCKADDR_IN = unsafe{ std::mem::zeroed()};
 		name.sin_family = AF_INET as u16;
 		if ipaddr.len() > 0 {
 			unsafe {
@@ -259,6 +245,42 @@ impl TcpSockHandle {
 		} else {
 			name.sin_port = 0;
 		}
+		return name;
+	}
+
+	fn _default_new(socktype :TcpSockType) -> Self {
+		Self {
+			mtype : socktype,
+			sock : INVALID_SOCKET,
+			accsock : INVALID_SOCKET,
+			inconn : 0,
+			connov : new_ov!(),
+			inacc : 0,
+			accov : new_ov!(),
+			inrd : 0,
+			rdov : new_ov!(),
+			inwr : 0,
+			wrov : new_ov!(),
+			acceptfunc : None,
+			connexfunc : None,
+			localaddr : format!(""),
+			peeraddr : format!(""),
+			peerport : 0,
+			localport : 0,
+			ooaccrd : 0,
+			accrdbuf : Vec::new(),
+			oordbuf : Vec::new(),
+			oordlen : 0,
+		}
+	}
+
+	fn _bind_addr(&mut self,ipaddr :&str, port :u32) -> Result<(),Box<dyn Error>> {
+		let name :SOCKADDR_IN;
+		let ret :i32;
+		let iret :c_int;
+		let namelen :c_int;
+
+		name = self._format_sockaddr_in(ipaddr,port);
 		
 		namelen = std::mem::size_of::<SOCKADDR_IN>() as c_int;
 		unsafe {
@@ -528,6 +550,185 @@ impl TcpSockHandle {
 
 		let _ = self._inner_accept()?;
 
+		Ok(retv)
+	}
+
+	fn _get_connect_func(&mut self, guid :&GUID) -> Result<(),Box<dyn Error>> {
+		let mut iret :c_int;
+		let mut dret :DWORD = 0;
+		unsafe {
+			let _funcptr :LPVOID = (&mut self.connexfunc as *mut LPFN_CONNECTEX ) as LPVOID;
+			let _funcsize:DWORD = std::mem::size_of::<LPFN_CONNECTEX>() as DWORD;
+			let _guidptr :LPVOID = (guid as *const GUID) as LPVOID;
+			let _guidsize :DWORD = std::mem::size_of::<GUID>() as DWORD;
+			let _retptr :LPDWORD = &mut dret;
+			let _ptrov :LPWSAOVERLAPPED = std::ptr::null::<WSAOVERLAPPED>() as LPWSAOVERLAPPED;
+			let _fncall :LPWSAOVERLAPPED_COMPLETION_ROUTINE = None;
+			iret = WSAIoctl(self.sock,SIO_GET_EXTENSION_FUNCTION_POINTER,_guidptr,_guidsize,_funcptr,_funcsize,_retptr,_ptrov,_fncall);
+		}
+
+		if iret != 0 {
+			iret = get_wsa_errno!();
+			evtcall_new_error!{SockHandleError,"cannot get WSAIoctl connexfunc error {}",iret}
+		}
+
+		if self.connexfunc.is_none() {
+			evtcall_new_error!{SockHandleError,"connexfunc none"}
+		}
+		Ok(())
+	}
+
+	fn _call_connect_func(&mut self,ipaddr :&str,port :u32) -> Result<i32,Box<dyn Error>> {
+		let mut name :SOCKADDR_IN ;
+		let mut dret : DWORD =0;
+		let wsaerr :c_int;
+		let mut completed :i32 = 1;
+		let bret :BOOL;
+
+		name = self._format_sockaddr_in(ipaddr,port);
+
+		unsafe {
+			let _namelen = std::mem::size_of::<SOCKADDR_IN>() as i32;
+			let _nameptr = (&mut name as * mut SOCKADDR_IN) as *mut SOCKADDR;
+			let _dretptr = &mut dret;
+			let _ovptr = &mut self.connov;
+			let _sndbuf = std::ptr::null_mut() as *mut c_void;
+			bret = self.connexfunc.as_ref().unwrap()(self.sock,_nameptr,_namelen,_sndbuf,0,_dretptr,_ovptr);
+		}
+
+		if bret == FALSE {
+			wsaerr = get_wsa_errno_direct!();
+			if wsaerr != (ERROR_IO_PENDING as i32){
+				evtcall_new_error!{SockHandleError,"connexfunc call error {}",wsaerr}
+			} 
+			completed = 0;
+		}
+		Ok(completed)
+	}
+
+	fn _get_self_name(&mut self) -> Result<(),Box<dyn Error>> {
+		let mut name :SOCKADDR_IN = unsafe {std::mem::zeroed()};
+		let ret :i32;
+		let eret :i32;
+
+		unsafe {
+			let _nameptr = (&mut name as *mut SOCKADDR_IN) as * mut SOCKADDR;
+			let mut _namelen:i32 = std::mem::size_of::<SOCKADDR_IN>() as i32;
+			ret = getsockname(self.sock,_nameptr,&mut _namelen);
+		}
+
+		if ret != 0 {
+			eret = get_wsa_errno!();
+			evtcall_new_error!{SockHandleError,"get sock name error {}",eret}
+		}
+
+		if name.sin_family != AF_INET as u16 {
+			evtcall_new_error!{SockHandleError,"sock not AF_INET {}",name.sin_family}
+		}
+
+		let mut svec :Vec<u8> = Vec::with_capacity(INET_ADDRSTRLEN);
+		for c in svec.iter_mut() {
+			*c = 0;
+		}
+		unsafe {
+			let _nptr = (&name.sin_addr as *const IN_ADDR) as * const c_void;
+			let _ipptr = svec.as_ptr() as *mut u8 as PSTR;
+			let _iplen = INET_ADDRSTRLEN;
+			inet_ntop(AF_INET,_nptr,_ipptr,_iplen);
+		}
+
+		let mut cv :Vec<u8> = Vec::new();
+		for c in svec.iter() {
+			if *c == 0 {
+				break;
+			}
+			cv.push(*c);
+		}
+
+		self.localaddr = String::from_utf8_lossy(&cv).to_string();
+		self.localport = unsafe{ ntohs(name.sin_port)} as u32;
+
+		Ok(())
+
+	}
+
+
+	pub fn connect_client(ipaddr :&str,port :u32,localip :&str, localport :u32, connected :bool) -> Result<Self,Box<dyn Error>> {
+		let mut retv :Self = Self::_default_new(TcpSockType::SockClientType);
+		let mut eret :u32;
+		let mut block :u_long;
+		let mut iret :c_int;
+		let guid :GUID = WSAID_CONNECTEX;
+		let mut bret :BOOL;
+		let mut dret :DWORD;
+
+		retv.peeraddr = format!("{}",ipaddr);
+		retv.peerport = port;
+		unsafe {
+			retv.sock = socket(AF_INET,SOCK_STREAM,0);
+		}
+
+		if retv.sock == INVALID_SOCKET {
+			iret = get_wsa_errno!();
+			evtcall_new_error!{SockHandleError,"socket client error {}",iret}
+		}
+
+		block = 1;
+		unsafe {
+			let _bptr = (&mut block) as *mut u_long;
+			iret = ioctlsocket(retv.sock,FIONBIO,_bptr);
+		}
+
+		if iret == SOCKET_ERROR {
+			iret = get_wsa_errno!();
+			evtcall_new_error!{SockHandleError,"ioctlsocket FIONBIO error {}",iret}
+		}
+
+		retv._bind_addr(localip,localport)?;
+
+		create_event_safe!(retv.connov.hEvent,"connov event");
+
+		retv._get_connect_func(&guid)?;
+		let completed = retv._call_connect_func(ipaddr,port)?;
+		if completed == 0 {
+			retv.inconn = 1;
+		} else {
+			retv.inconn = 0;
+			retv._get_self_name()?;
+			retv._inner_make_read_write()?;
+		}
+		if retv.inconn > 0 && connected {
+			loop {
+				unsafe {
+					dret = WaitForSingleObject(retv.connov.hEvent,INFINITE);
+				}
+				if dret == WAIT_OBJECT_0 {
+					unsafe {
+						let _ovptr = &mut retv.connov;
+						let _dretptr = &mut dret;
+						bret = GetOverlappedResult(retv.sock as HANDLE,_ovptr,_dretptr,FALSE);
+					}
+					if bret == TRUE {
+						break;
+					}
+					eret = get_errno_direct!();
+					if eret == ERROR_IO_INCOMPLETE || eret == ERROR_IO_PENDING {
+						continue;
+					}
+					evtcall_new_error!{SockHandleError,"GetOverlappedResult error {}",eret}
+				} else {
+					eret = get_errno_direct!();
+					evtcall_new_error!{SockHandleError,"WaitForSingleObject error {} {}",dret,eret}
+				}
+			}
+
+			/*we already connected*/
+			retv.inconn = 0;
+			retv._get_self_name()?;
+			retv._inner_make_read_write()?;
+		}
+
+		evtcall_log_trace!("connect [{}:{}] inconn {}",ipaddr,port,retv.inconn);
 		Ok(retv)
 	}
 
