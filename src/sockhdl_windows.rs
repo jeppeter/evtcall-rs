@@ -34,6 +34,7 @@ pub struct SockHandle {
 	mtype : SockType,
 	inconn : i32,
 	sock : SOCKET,
+	accsock :SOCKET,
 	connov :OVERLAPPED,
 	inrd :i32,
 	rdov :OVERLAPPED,
@@ -189,6 +190,7 @@ impl SockHandle {
 		close_handle_safe!(self.wrov.hEvent,"wrov handle");
 
 		close_socket_safe!(self.sock,"sock handle");
+		close_socket_safe!(self.accsock,"accsock handle");
 
 		return;
 	}
@@ -197,6 +199,7 @@ impl SockHandle {
 		Self {
 			mtype : socktype,
 			sock : INVALID_SOCKET,
+			accsock : INVALID_SOCKET,
 			inconn : 0,
 			connov : new_ov!(),
 			inacc : 0,
@@ -266,6 +269,22 @@ impl SockHandle {
 		Ok(())
 	}
 
+	fn _inner_accept(&mut self) -> Result<(),Box<dyn Error>> {
+		let ret :i32;
+		if self.accsock != INVALID_SOCKET {
+			evtcall_new_error!{SockHandleError,"accsock not in"}
+		}
+
+		unsafe {
+			self.accsock = socket(AF_INET,SOCK_STREAM,0);
+		}
+		if self.accsock == INVALID_SOCKET {
+			ret = get_wsa_errno!();
+			evtcall_new_error!{SockHandleError,"socket accsock error {}",ret}
+		}
+		Ok(())
+	}
+
 	#[allow(dead_code)]
 	#[allow(unused_variables)]
 	#[allow(unused_mut)]
@@ -330,8 +349,8 @@ impl SockHandle {
 
 		}
 
-		retv._get_accept_func(&accguid)?;	
-
+		retv._get_accept_func(&accguid)?;
+		retv._inner_accept()?;
 
 		Ok(retv)
 	}
