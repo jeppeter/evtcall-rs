@@ -1,7 +1,6 @@
 
 use winapi::um::winnt::{HANDLE,PVOID,LPCWSTR};
-//use winapi::um::winsock2::{WSAStartup,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSACleanup,socket,SOCKET,closesocket,INVALID_SOCKET,SOCKET_ERROR,SOCK_STREAM,PF_INET,ioctlsocket,u_long};
-use winapi::um::winsock2::*;
+use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO};
 use winapi::um::mswsock::{LPFN_CONNECTEX,WSAID_CONNECTEX};
 use winapi::shared::ws2def::*;
 use winapi::shared::inaddr::*;
@@ -13,7 +12,7 @@ use winapi::um::errhandlingapi::{GetLastError,SetLastError};
 use winapi::um::minwinbase::{OVERLAPPED,LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES,LPOVERLAPPED};
 use winapi::um::handleapi::{CloseHandle};
 use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD,TRUE,FALSE,LPVOID,LPDWORD};
-use winapi::ctypes::{c_int,c_void};
+use winapi::ctypes::{c_int,c_void,c_char};
 
 use super::{evtcall_error_class,evtcall_new_error};
 use super::consts_windows::{NULL_HANDLE_VALUE};
@@ -43,6 +42,8 @@ pub struct SockHandle {
 	inacc :i32,
 	accov :OVERLAPPED,
 	acceptfunc : LPFN_CONNECTEX,
+	localaddr : String,
+	localport : u32,
 }
 
 impl Drop for SockHandle {
@@ -177,15 +178,9 @@ impl SockHandle {
 		return;
 	}
 
-	#[allow(dead_code)]
-	#[allow(unused_variables)]
-	#[allow(unused_mut)]
-	pub fn bind_server(ipaddr :&str,port :u32,localip :&str,localport :u32,connected :bool) -> Result<Self,Box<dyn Error>> {
-		if ipaddr.len() == 0 || port == 0 {
-			evtcall_new_error!{SockHandleError,"not valid ipaddr [{}] or port [{}]",ipaddr,port}
-		}
-		let mut retv :Self = Self {
-			mtype : SockType::SockServerType,
+	fn _default_new(socktype :SockType) -> Self {
+		Self {
+			mtype : socktype,
 			sock : INVALID_SOCKET,
 			inconn : 0,
 			connov : new_ov!(),
@@ -196,9 +191,22 @@ impl SockHandle {
 			inwr : 0,
 			wrov : new_ov!(),
 			acceptfunc : None,
-		};
+			localaddr : format!(""),
+			localport : 0,
+		}
+	}
+
+	#[allow(dead_code)]
+	#[allow(unused_variables)]
+	#[allow(unused_mut)]
+	pub fn bind_server(ipaddr :&str,port :u32,localip :&str,localport :u32,connected :bool) -> Result<Self,Box<dyn Error>> {
+		if ipaddr.len() == 0 || port == 0 {
+			evtcall_new_error!{SockHandleError,"not valid ipaddr [{}] or port [{}]",ipaddr,port}
+		}
+		let mut retv :Self = Self::_default_new(SockType::SockServerType);
 		let mut ret :i32;
 		let mut iret :c_int;
+		let mut opt :c_int;
 		let mut block :u_long;
 		let mut name :SOCKADDR_IN = unsafe {std::mem::zeroed()};
 		let namelen :c_int;
@@ -206,8 +214,8 @@ impl SockHandle {
 		let mut dret :DWORD = 0;
 		let mut bret :BOOL;
 
-
-
+		retv.localaddr = format!("{}",ipaddr);
+		retv.localport = port;
 		unsafe {
 			retv.sock = socket(AF_INET,winapi::shared::ws2def::SOCK_STREAM,0);
 		}
@@ -218,9 +226,24 @@ impl SockHandle {
 			evtcall_new_error!{SockHandleError,"cannot socket error {}",ret}
 		}
 
+		opt = 1;
+		unsafe {
+			let _optptr = (&opt as *const c_int) as *const c_char;
+			let _optsize = std::mem::size_of::<DWORD>() as c_int;
+			iret = setsockopt(retv.sock,SOL_SOCKET,SO_REUSEADDR,_optptr,_optsize);
+		}
+
+		if iret == SOCKET_ERROR {
+			ret = get_errno!();
+			retv.free();
+			evtcall_new_error!{SockHandleError,"cannot setopt reuse error {}",ret}
+		}
+
+
 		block = 1;
 		unsafe {
-			iret = ioctlsocket(retv.sock,FIONBIO,&mut block);
+			let _blkptr = &mut block as * mut u_long;
+			iret = ioctlsocket(retv.sock,FIONBIO,_blkptr);
 		}
 
 		if iret == SOCKET_ERROR {
@@ -228,6 +251,7 @@ impl SockHandle {
 			retv.free();
 			evtcall_new_error!{SockHandleError,"cannot set non-block error {}",ret}
 		}
+
 
 		name.sin_family = AF_INET as u16;
 		if localip.len() != 0 {
