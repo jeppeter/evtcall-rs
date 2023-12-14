@@ -1,6 +1,6 @@
 
 use winapi::um::winnt::{HANDLE,PVOID,LPCWSTR,PSTR};
-use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen,WSA_IO_PENDING,getpeername,ntohs,getsockname};
+use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen,WSA_IO_PENDING,getpeername,ntohs,getsockname,MSG_PARTIAL,WSARecv};
 use winapi::um::mswsock::{LPFN_ACCEPTEX,WSAID_ACCEPTEX,SO_UPDATE_ACCEPT_CONTEXT,LPFN_CONNECTEX,WSAID_CONNECTEX};
 
 use winapi::shared::ws2def::*;
@@ -56,7 +56,8 @@ pub struct TcpSockHandle {
 	accrdbuf : Vec<u8>,
 	oordbuf :Vec<u8>,
 	oordlen : DWORD,
-
+	rdptr :*mut i8,
+	rdlen : u32,
 }
 
 impl Drop for TcpSockHandle {
@@ -225,6 +226,7 @@ impl TcpSockHandle {
 		close_socket_safe!(self.sock,"sock handle");
 		close_socket_safe!(self.accsock,"accsock handle");
 
+
 		return;
 	}
 
@@ -271,6 +273,8 @@ impl TcpSockHandle {
 			accrdbuf : Vec::new(),
 			oordbuf : Vec::new(),
 			oordlen : 0,
+			rdptr : std::ptr::null_mut::<i8>(),
+			rdlen : 0,
 		}
 	}
 
@@ -758,6 +762,84 @@ impl TcpSockHandle {
 		Ok(retv)
 	}
 
+	fn _inner_read(&mut self) ->Result<(),Box<dyn Error>> {
+		let mut iret :c_int;
+		let mut rdbuf :WSABUF = unsafe {std::mem::zeroed()};
+		let mut flags : DWORD;
+		let eret :i32;
+		let mut dret  :DWORD=0;
+		loop {
+			rdbuf.len = self.rdlen;
+			rdbuf.buf = self.rdptr;
+			flags = MSG_PARTIAL as DWORD;
+			unsafe {
+				let _rdptr = &mut rdbuf;
+				let _flagptr = &mut flags;
+				let _dretptr = &mut dret;
+				let _ovptr = &mut self.rdov;
+				let _funcptr = None;
+				iret = WSARecv(self.sock,_rdptr,1,_dretptr,_flagptr,_ovptr,_funcptr);
+			}
+
+			if iret == 0 {
+				if dret == 0 {
+					evtcall_new_error!{SockHandleError,"closed local[{}:{}] peer[{}:{}]",self.localaddr,self.localport,self.peeraddr,self.peerport}
+				}
+
+				self.rdlen -= dret;
+				self.rdptr = unsafe{ self.rdptr.offset(dret as isize)};
+
+				if self.rdlen == 0 {
+					self.inrd = 0;
+					self.rdlen = 0;
+					self.rdptr = std::ptr::null_mut::<i8>();
+					return Ok(());
+				}
+				continue;
+			}
+
+			eret = get_wsa_errno_direct!();
+			if eret == WSA_IO_PENDING {
+				return Ok(());
+			}
+			evtcall_new_error!{SockHandleError,"closed local[{}:{}] peer[{}:{}] error [{}]",self.localaddr,self.localport,self.peeraddr,self.peerport,eret}
+		}
+	}
+
+	pub fn complete_read(&mut self) -> Result<i32,Box<dyn Error>> {
+		let bret :BOOL;
+		let eret :u32;
+		let mut dret :DWORD = 0;
+		if self.inrd > 0 {
+			unsafe {
+				let _hd = self.sock as HANDLE;
+				let _ovptr = (&mut self.rdov) as LPOVERLAPPED;
+				let _dptr = (&mut dret) as LPDWORD;
+				bret = GetOverlappedResult(_hd,_ovptr,_dptr,FALSE);
+			}
+
+			if bret == FALSE {
+				eret = get_errno_direct!();
+				evtcall_new_error!{SockHandleError,"get read ov error {}",eret}
+			}
+
+			self.rdptr = unsafe{self.rdptr.offset(dret as isize)};
+			self.rdlen -= dret;
+			if self.rdlen == 0 {
+				self.inrd = 0;
+				self.rdptr = std::ptr::null_mut::<i8>();
+				self.rdlen = 0;
+			} else {
+				self._inner_read()?;
+			}
+		}
+
+		let mut completed :i32 = 1;
+		if self.inrd > 0 {
+			completed = 0;
+		}
+		Ok(completed)
+	}
 
 }
 
