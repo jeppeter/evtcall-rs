@@ -155,14 +155,13 @@ macro_rules! new_ov {
 }
 
 macro_rules! create_event_safe {
-	($hd :expr,$freval :expr,$name :expr) => {
+	($hd :expr,$name :expr) => {
 		let _errval :i32;
 		let _pattr :LPSECURITY_ATTRIBUTES = std::ptr::null_mut::<SECURITY_ATTRIBUTES>() as LPSECURITY_ATTRIBUTES;
 		let _pstr :LPCWSTR = std::ptr::null() as LPCWSTR;
 		$hd = unsafe {CreateEventW(_pattr,TRUE,FALSE,_pstr)};
 		if $hd == NULL_HANDLE_VALUE {
 			_errval = get_errno!();
-			$freval.free();
 			evtcall_new_error!{SockHandleError,"create {} error {}",$name,_errval}
 		}
 	};
@@ -385,7 +384,7 @@ impl TcpSockHandle {
 
 		retv._bind_addr(ipaddr,port)?;
 
-		create_event_safe!(retv.connov.hEvent,retv,"connov handle");
+		create_event_safe!(retv.connov.hEvent,"connov handle");
 
 		unsafe {
 			iret = listen(retv.sock,backlog);
@@ -488,6 +487,12 @@ impl TcpSockHandle {
 		Ok(())
 	}
 
+	fn _inner_make_read_write(&mut self) -> Result<(),Box<dyn Error>> {
+		create_event_safe!(self.rdov.hEvent,"rdov event");
+		create_event_safe!(self.wrov.hEvent,"wrov event");
+		Ok(())
+	}
+
 	pub fn accept_socket(&mut self) -> Result<Self,Box<dyn Error>> {
 		let mut retv :Self = Self::_default_new(TcpSockType::SockServerType);
 		let sret :c_int;
@@ -519,6 +524,9 @@ impl TcpSockHandle {
 		}
 
 		retv._get_peer_name()?;
+		retv._inner_make_read_write()?;
+
+		let _ = self._inner_accept()?;
 
 		Ok(retv)
 	}
