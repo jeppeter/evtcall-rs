@@ -1,6 +1,6 @@
 
 use winapi::um::winnt::{HANDLE,PVOID,LPCWSTR};
-use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen};
+use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen,WSA_IO_PENDING};
 use winapi::um::mswsock::{LPFN_ACCEPTEX,WSAID_ACCEPTEX};
 use winapi::shared::ws2def::*;
 use winapi::shared::inaddr::*;
@@ -9,7 +9,7 @@ use winapi::um::ws2tcpip::*;
 use winapi::um::synchapi::*;
 use winapi::um::ioapiset::{CancelIoEx};
 use winapi::um::errhandlingapi::{GetLastError,SetLastError};
-use winapi::um::minwinbase::{OVERLAPPED,LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES};
+use winapi::um::minwinbase::{OVERLAPPED,LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES,LPOVERLAPPED};
 use winapi::um::handleapi::{CloseHandle};
 use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD,TRUE,FALSE,LPVOID,LPDWORD};
 use winapi::ctypes::{c_int,c_char};
@@ -34,7 +34,6 @@ pub struct SockHandle {
 	mtype : SockType,
 	inconn : i32,
 	sock : SOCKET,
-	accsock :SOCKET,
 	connov :OVERLAPPED,
 	inrd :i32,
 	rdov :OVERLAPPED,
@@ -45,6 +44,10 @@ pub struct SockHandle {
 	acceptfunc : LPFN_ACCEPTEX,
 	localaddr : String,
 	localport : u32,
+	accsock :SOCKET,
+	ooaccrd :DWORD,
+	accrdbuf : Vec<u8>,
+
 }
 
 impl Drop for SockHandle {
@@ -211,6 +214,8 @@ impl SockHandle {
 			acceptfunc : None,
 			localaddr : format!(""),
 			localport : 0,
+			ooaccrd : 0,
+			accrdbuf : Vec::new(),
 		}
 	}
 
@@ -269,8 +274,10 @@ impl SockHandle {
 		Ok(())
 	}
 
-	fn _inner_accept(&mut self) -> Result<(),Box<dyn Error>> {
+	fn _inner_accept(&mut self) -> Result<i32,Box<dyn Error>> {
 		let ret :i32;
+		let bret :BOOL;
+		let mut dret : DWORD = 0;
 		if self.accsock != INVALID_SOCKET {
 			evtcall_new_error!{SockHandleError,"accsock not in"}
 		}
@@ -282,7 +289,31 @@ impl SockHandle {
 			ret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"socket accsock error {}",ret}
 		}
-		Ok(())
+		self.ooaccrd = 0;
+		self.inacc = 0;
+		self.accrdbuf = Vec::with_capacity(1024);
+		assert!(self.acceptfunc.is_some());
+
+		unsafe {
+			let _dretptr = (&mut dret) as LPDWORD;
+			let _outbuf = (self.accrdbuf.as_ptr() as *mut u8) as LPVOID;
+			let _localaddrlen = (std::mem::size_of::<SOCKADDR_IN>() + 16) as DWORD;
+			let _ovptr = &mut self.accov as LPOVERLAPPED;
+			bret = self.acceptfunc.as_ref().unwrap()(self.sock,self.accsock,_outbuf,0,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
+		}
+
+		if bret == FALSE {
+			ret = get_wsa_errno!();
+			if ret != -WSA_IO_PENDING {
+				evtcall_new_error!{SockHandleError,"call acceptfunc error {}",ret}
+			}
+			self.inacc = 1;
+		} else {
+			self.inacc = 0;
+			self.ooaccrd = dret;
+		}
+
+		Ok(self.inacc)
 	}
 
 	#[allow(dead_code)]
@@ -350,7 +381,7 @@ impl SockHandle {
 		}
 
 		retv._get_accept_func(&accguid)?;
-		retv._inner_accept()?;
+		let _ = retv._inner_accept()?;
 
 		Ok(retv)
 	}
