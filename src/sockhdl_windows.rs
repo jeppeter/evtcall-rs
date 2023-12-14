@@ -58,6 +58,7 @@ pub struct TcpSockHandle {
 	oordlen : DWORD,
 	rdptr :*mut i8,
 	rdlen : u32,
+	iscloseerr : bool,
 }
 
 impl Drop for TcpSockHandle {
@@ -275,6 +276,7 @@ impl TcpSockHandle {
 			oordlen : 0,
 			rdptr : std::ptr::null_mut::<i8>(),
 			rdlen : 0,
+			iscloseerr : false,
 		}
 	}
 
@@ -762,6 +764,10 @@ impl TcpSockHandle {
 		Ok(retv)
 	}
 
+	pub fn is_close_error(&self) -> bool {
+		return self.iscloseerr;
+	}
+
 	fn _inner_read(&mut self) ->Result<(),Box<dyn Error>> {
 		let mut iret :c_int;
 		let mut rdbuf :WSABUF = unsafe {std::mem::zeroed()};
@@ -783,6 +789,7 @@ impl TcpSockHandle {
 
 			if iret == 0 {
 				if dret == 0 {
+					self.iscloseerr = true;
 					evtcall_new_error!{SockHandleError,"closed local[{}:{}] peer[{}:{}]",self.localaddr,self.localport,self.peeraddr,self.peerport}
 				}
 
