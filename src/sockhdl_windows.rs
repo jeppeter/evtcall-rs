@@ -431,6 +431,32 @@ impl TcpSockHandle {
 		return retv;
 	}
 
+	pub fn get_connect_handle(&self) -> u64 {
+		let mut retv :u64 = 0;
+
+		if self.inconn > 0 {
+			retv = self.connov.hEvent as u64;
+		}
+		return retv;
+	}
+
+	pub fn get_read_handle(&self) -> u64 {
+		let mut retv :u64 = 0;
+		if self.inrd > 0 {
+			retv = self.rdov.hEvent as u64;
+		}
+		return retv;
+	}
+
+	pub fn get_write_handle(&self) -> u64 {
+		let mut retv :u64 = 0;
+		if self.inwr > 0 {
+			retv = self.wrov.hEvent as u64;
+		}
+		return retv;
+	}
+
+
 	pub fn complete_accept(&mut self) -> Result<i32,Box<dyn Error>> {
 		let mut completed :i32 = 0;
 		let mut dret :DWORD = 0;
