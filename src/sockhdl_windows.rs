@@ -19,6 +19,7 @@ use winapi::shared::winerror::{ERROR_IO_INCOMPLETE,ERROR_IO_PENDING};
 
 use super::{evtcall_error_class,evtcall_new_error};
 use super::consts_windows::{NULL_HANDLE_VALUE};
+use super::consts::*;
 use std::error::Error;
 use crate::logger::*;
 use crate::*;
@@ -451,7 +452,7 @@ impl TcpSockHandle {
 	}
 
 	pub fn get_accept_handle(&self) -> u64 {
-		let mut retv :u64 = 0;
+		let mut retv :u64 = INVALID_EVENT_HANDLE;
 		if self.inacc > 0 {
 			retv = self.accov.hEvent as u64;
 		}
@@ -459,7 +460,7 @@ impl TcpSockHandle {
 	}
 
 	pub fn get_connect_handle(&self) -> u64 {
-		let mut retv :u64 = 0;
+		let mut retv :u64 = INVALID_EVENT_HANDLE;
 
 		if self.inconn > 0 {
 			retv = self.connov.hEvent as u64;
@@ -468,7 +469,7 @@ impl TcpSockHandle {
 	}
 
 	pub fn get_read_handle(&self) -> u64 {
-		let mut retv :u64 = 0;
+		let mut retv :u64 = INVALID_EVENT_HANDLE;
 		if self.inrd > 0 {
 			retv = self.rdov.hEvent as u64;
 		}
@@ -476,7 +477,7 @@ impl TcpSockHandle {
 	}
 
 	pub fn get_write_handle(&self) -> u64 {
-		let mut retv :u64 = 0;
+		let mut retv :u64 = INVALID_EVENT_HANDLE;
 		if self.inwr > 0 {
 			retv = self.wrov.hEvent as u64;
 		}
