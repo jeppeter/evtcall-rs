@@ -999,7 +999,37 @@ impl TcpSockHandle {
 		Ok(completed)
 	}
 
+	pub fn is_accept_mode(&self) -> bool {
+		let mut retv :bool = false;
+		if self.inacc > 0 {
+			retv = true;
+		}
+		return retv;
+	}
 
+	pub fn is_connect_mode(&self) -> bool {
+		let mut retv :bool = false;
+		if self.inconn > 0 {
+			retv = true;
+		}
+		return retv;
+	}
+
+	pub fn is_read_mode(&self) -> bool {
+		let mut retv :bool = false;
+		if self.inrd > 0 {
+			retv = true;
+		}
+		return retv;
+	}
+
+	pub fn is_write_mode(&self) -> bool {
+		let mut retv :bool = false;
+		if self.inwr > 0 {
+			retv = true;
+		}
+		return retv;
+	}
 }
 
 #[allow(dead_code)]
