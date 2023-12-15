@@ -10,18 +10,24 @@ use std::collections::HashMap;
 use libc::{c_int};
 
 use super::{evtcall_error_class,evtcall_new_error};
+use super::*;
+use super::logger::*;
 
 evtcall_error_class!{MainLoopLinuxError}
 
 
 struct EvtCallLinux {
 	evt :Arc<*mut dyn EvtCall>,
+	evthd : u64,
+	evttype : u32,
 }
 
 impl EvtCallLinux {
-	fn new(av :Arc<* mut dyn EvtCall>) -> Result<Self,Box<dyn Error>> {
+	fn new(av :Arc<* mut dyn EvtCall>,evthd : u64,evttype :u32) -> Result<Self,Box<dyn Error>> {
 		Ok(Self{
 			evt : av,
+			evthd : evthd,
+			evttype : evttype,
 		})
 	}
 }
@@ -46,6 +52,7 @@ impl EvtTimerLinux {
 }
 
 pub struct EvtMain {
+	dummyfd : c_int,
 	evtmaps :HashMap<u64,EvtCallLinux>,
 	timermaps :HashMap<u64,EvtTimerLinux>,
 	guidevtmaps : HashMap<u64,u64>,
@@ -63,6 +70,7 @@ impl Drop for EvtMain {
 impl EvtMain {
 	pub fn new(_flags :u32) -> Result<Self,Box<dyn Error>> {
 		let mut retv = Self {
+			dummyfd : -1,
 			evtmaps : HashMap::new(),
 			timermaps : HashMap::new(), 
 			guidevtmaps : HashMap::new(),
@@ -75,10 +83,27 @@ impl EvtMain {
 			evtcall_new_error!{MainLoopLinuxError,"cannot epoll_create1"}
 		}
 
+		retv.dummyfd = unsafe {libc::eventfd(0,libc::EFD_NONBLOCK | libc::EFD_CLOEXEC)};
+		if retv.dummyfd < 0 {
+			evtcall_new_error!{MainLoopLinuxError,"cannot eventfd create"}
+		}
+
+		let optype :u32 = (libc::EPOLLIN | libc::EPOLLET) as u32;
+		let mut evt :libc::epoll_event = libc::epoll_event {
+			events : optype,
+			u64 : retv.dummyfd as u64,
+		};
+		let reti :c_int;
+
+		unsafe{
+			reti = libc::epoll_ctl(retv.epollfd,libc::EPOLL_CTL_ADD,retv.dummyfd as i32,&mut evt);
+		}
+		if reti < 0 {
+			evtcall_new_error!{MainLoopLinuxError,"can not EPOLL_ADD error [{}]",reti}
+		}
 		Ok(retv)
 	}
 
-	#[allow(unused_variables)]
 	pub fn add_timer(&mut self,bv :Arc<*mut dyn EvtTimer>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
 		self.guid += 1;
 		let ntimer :EvtTimerLinux = EvtTimerLinux::new(bv,interval,conti)?;
@@ -86,13 +111,8 @@ impl EvtMain {
 		Ok(self.guid)
 	}
 
-	#[allow(unused_variables)]
-	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>) -> Result<(),Box<dyn Error>> {
-		let evtid :u64 ;
-		let b = Arc::as_ptr(&bv);
+	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>,evthd :u64, evttype :u32) -> Result<(),Box<dyn Error>> {
 		unsafe {
-			evtid = (&(*(*b))).get_evt();
-			let evttype = (&(*(*b))).get_evttype();
 			let mut optype :u32 = 0;
 			if (evttype & READ_EVENT) != 0 {
 				optype |= libc::EPOLLIN as u32;
@@ -108,23 +128,22 @@ impl EvtMain {
 			}
 			let mut evt :libc::epoll_event = libc::epoll_event {
 				events : optype,
-				u64 : evtid,
+				u64 : evthd,
 			};
 
-			let retv = libc::epoll_ctl(self.epollfd,libc::EPOLL_CTL_ADD,evtid as i32,&mut evt);
+			let retv = libc::epoll_ctl(self.epollfd,libc::EPOLL_CTL_ADD,evthd as i32,&mut evt);
 			if retv < 0 {
 				evtcall_new_error!{MainLoopLinuxError,"can not EPOLL_ADD error [{}]",retv}
 			}
 		}
 
-		let ev = EvtCallLinux::new(bv)?;
+		let ev = EvtCallLinux::new(bv,evthd,evttype)?;
 		self.guid += 1;
 		self.evtmaps.insert(self.guid,ev);
-		self.guidevtmaps.insert(evtid, self.guid);
+		self.guidevtmaps.insert(evthd, self.guid);
 		Ok(())
 	}
 
-	#[allow(unused_variables)]
 	pub fn remove_timer(&mut self,guid:u64) -> Result<(),Box<dyn Error>> {
 		match self.timermaps.get(&guid) {
 			Some(_v) => {
@@ -138,13 +157,30 @@ impl EvtMain {
 		Ok(())
 	}
 
-	#[allow(unused_variables)]
-	pub fn remove_event(&mut self,bv :Arc<*mut dyn EvtCall>) -> Result<(),Box<dyn Error>> {
-		let evtid :u64;
-		let b = Arc::as_ptr(&bv);
+	pub fn remove_event(&mut self,evthd :u64) -> Result<(),Box<dyn Error>> {
+
+		let curguid :u64;
+		match self.guidevtmaps.get(&evthd) {
+			Some(_v) => {
+				curguid = *_v;
+			},
+			None => {
+				evtcall_new_error!{MainLoopLinuxError,"cannot found 0x{:x} evtid",evthd}
+			}
+		}
+
+		let evttype :u32;
+		match self.evtmaps.get(&curguid) {
+			Some(_v) => {
+				evttype = _v.evttype;
+			},
+			None => {
+				evtcall_new_error!{MainLoopLinuxError,"cannot found evthd 0x{:x} for evttype",evthd}
+			}
+		}
+
+
 		unsafe {
-			evtid = (&(*(*b))).get_evt();
-			let evttype = (&(*(*b))).get_evttype();
 			let mut optype :u32 = 0;
 			if (evttype & READ_EVENT) != 0 {
 				optype |= libc::EPOLLIN as u32;
@@ -160,26 +196,16 @@ impl EvtMain {
 			}
 			let mut evt :libc::epoll_event = libc::epoll_event {
 				events : optype,
-				u64 : evtid,
+				u64 : evthd,
 			};
 
-			let retv = libc::epoll_ctl(self.epollfd,libc::EPOLL_CTL_DEL,evtid as i32,&mut evt);
+			let retv = libc::epoll_ctl(self.epollfd,libc::EPOLL_CTL_DEL,evthd as i32,&mut evt);
 			if retv < 0 {
 				evtcall_new_error!{MainLoopLinuxError,"can not EPOLL_ADD error [{}]",retv}
 			}
 		}
 
-		let curguid :u64;
-		match self.guidevtmaps.get(&evtid) {
-			Some(_v) => {
-				curguid = *_v;
-			},
-			None => {
-				evtcall_new_error!{MainLoopLinuxError,"cannot found 0x{:x} evtid",evtid}
-			}
-		}
-
-		self.guidevtmaps.remove(&evtid);
+		self.guidevtmaps.remove(&evthd);
 		self.evtmaps.remove(&curguid);
 		Ok(())
 	}
@@ -283,11 +309,14 @@ impl EvtMain {
 			while idx < evtguids.len() {
 				guid = evtguids[idx];
 				let mut findvk :Option<Arc<* mut dyn EvtCall>> = None;
+				let mut evthd :u64 = INVALID_EVENT_HANDLE;
 				match self.evtmaps.get(&guid) {
 					Some(ev) => {
 						findvk = Some(ev.evt.clone());
+						evthd = ev.evthd;
 					},
 					None => {
+						evtcall_log_trace!("missing {} guid",guid);
 					}
 				}
 
@@ -297,22 +326,9 @@ impl EvtMain {
 					let evttype :u32;
 
 					evttype = evttypes[idx];
-					if (evttype & READ_EVENT) != 0 {
-						unsafe {
-							(&mut (*(*b))).read(self)?;
-						}
-					}
 
-					if (evttype & WRITE_EVENT) != 0 {
-						unsafe {
-							(&mut (*(*b))).write(self)?;
-						}
-					}
-
-					if (evttype & ERROR_EVENT) != 0 {
-						unsafe {
-							(&mut (*(*b))).error(self)?;
-						}
+					unsafe {
+						(&mut (*(*b))).handle(evthd,evttype,self)?;
 					}
 				}
 
@@ -336,7 +352,7 @@ impl EvtMain {
 					let c :EvtTimerLinux = findtv.unwrap();
 					let b = Arc::as_ptr(&(c.timer));
 					unsafe {
-						(&mut (*(*b))).timer(self)?;
+						(&mut (*(*b))).timer(guid,self)?;
 					}
 
 
@@ -374,6 +390,13 @@ impl EvtMain {
 			}			
 		}
 		self.epollfd = -1;
+
+		if self.dummyfd >= 0 {
+			unsafe {
+				libc::close(self.dummyfd);
+			}
+		}
+		self.dummyfd = -1;
 		self.evtmaps = HashMap::new();
 		self.guidevtmaps = HashMap::new();
 		self.timermaps = HashMap::new();

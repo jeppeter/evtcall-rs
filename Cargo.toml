@@ -9,6 +9,8 @@ edition = "2021"
 chrono = "^0.4.0"
 lazy_static = "^1.4.0"
 
+[target.'cfg(unix)'.dependencies.libc]
+version = "0.2"
 
 [target.'cfg(windows)'.dependencies.winapi]
 version = "0.3"

@@ -5,26 +5,82 @@ use std::sync::Arc;
 use std::error::Error;
 use std::collections::HashMap;
 use crate::timeop::*;
-use crate::consts::*;
 
-use winapi::um::winnt::{HANDLE,STATUS_WAIT_0};
+use winapi::um::winnt::{HANDLE,LPCWSTR};
+
 use winapi::um::synchapi::{WaitForMultipleObjectsEx};
-use winapi::shared::minwindef::{FALSE,DWORD};
-
-use super::{evtcall_error_class,evtcall_new_error};
+use winapi::shared::minwindef::{FALSE,DWORD,TRUE,BOOL};
+use winapi::um::errhandlingapi::{GetLastError};
+use winapi::um::minwinbase::{LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES};
+use winapi::um::winbase::{WAIT_OBJECT_0};
+use winapi::um::synchapi::{CreateEventW};
+use winapi::um::handleapi::{CloseHandle};
+use crate::{evtcall_error_class,evtcall_new_error,evtcall_log_error};
+use crate::consts_windows::*;
+use crate::logger::*;
 
 evtcall_error_class!{MainLoopWindowsError}
+
+macro_rules! get_errno {
+	() => {{
+		let mut retv :i32 ;
+		unsafe {
+			retv = GetLastError() as i32;
+		}
+		if retv != 0 {
+			retv = -retv;
+		} else {
+			retv = -1;
+		}
+		retv
+	}};
+}
+
+
+macro_rules! create_event_safe {
+	($hd :expr,$name :expr) => {
+		let _errval :i32;
+		let _pattr :LPSECURITY_ATTRIBUTES = std::ptr::null_mut::<SECURITY_ATTRIBUTES>() as LPSECURITY_ATTRIBUTES;
+		let _pstr :LPCWSTR = std::ptr::null() as LPCWSTR;
+		$hd = unsafe {CreateEventW(_pattr,TRUE,FALSE,_pstr)};
+		if $hd == NULL_HANDLE_VALUE {
+			_errval = get_errno!();
+			evtcall_new_error!{MainLoopWindowsError,"create {} error {}",$name,_errval}
+		}
+	};
+}
+
+macro_rules! close_handle_safe {
+	($hdval : expr,$name :expr) => {
+		let _bret :BOOL;
+		let _errval :i32;
+		if $hdval != NULL_HANDLE_VALUE {
+			unsafe {
+				_bret = CloseHandle($hdval);
+			}
+			if _bret == FALSE {
+				_errval = get_errno!();
+				evtcall_log_error!("CloseHandle {} error {}",$name,_errval);
+			}
+		}
+		$hdval = NULL_HANDLE_VALUE;
+	};
+}
 
 
 #[derive(Clone)]
 struct EvtCallWindows {
 	evt :Arc<*mut dyn EvtCall>,
+	evthd : u64,
+	evttype : u32,
 }
 
 impl EvtCallWindows {
-	fn new(av :Arc<* mut dyn EvtCall>) -> Result<Self,Box<dyn Error>> {
+	fn new(av :Arc<* mut dyn EvtCall>,evthd :u64, evttype :u32) -> Result<Self,Box<dyn Error>> {
 		Ok(Self{
 			evt : av,
+			evthd : evthd,
+			evttype : evttype,
 		})
 	}
 }
@@ -50,6 +106,7 @@ impl EvtTimerWindows {
 
 
 pub struct EvtMain {
+	timerevt :Vec<HANDLE>,
 	evtmaps :HashMap<u64,EvtCallWindows>,
 	timermaps :HashMap<u64,EvtTimerWindows>,
 	guidevtmaps :HashMap<u64,u64>,
@@ -65,13 +122,17 @@ impl Drop for EvtMain {
 
 impl EvtMain {
 	pub fn new() -> Result<Self,Box<dyn Error>> {
-		Ok(Self {
+		let mut retv :Self = Self {
+			timerevt : Vec::new(),
 			evtmaps : HashMap::new(),
 			timermaps : HashMap::new(),
 			guidevtmaps : HashMap::new(),
 			guid : 1,
 			exited : 0,
-		})
+		};
+		retv.timerevt.push(NULL_HANDLE_VALUE);
+		create_event_safe!(retv.timerevt[0],"timer event");
+		Ok(retv)
 	}
 
 	pub fn add_timer(&mut self,bv :Arc<*mut dyn EvtTimer>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
@@ -82,16 +143,11 @@ impl EvtMain {
 	}
 
 	#[allow(unused_variables)]
-	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>) -> Result<(),Box<dyn Error>> {
+	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>,evthd :u64,evttype :u32) -> Result<(),Box<dyn Error>> {
 		self.guid += 1;
-		let b = Arc::as_ptr(&bv);
-		let evtid :u64;
-		unsafe {
-			evtid = (&(*(*b))).get_evt();
-		}
-		let nevt :EvtCallWindows = EvtCallWindows::new(bv)?;
+		let nevt :EvtCallWindows = EvtCallWindows::new(bv,evthd,evttype)?;
 		self.evtmaps.insert(self.guid,nevt);
-		self.guidevtmaps.insert(evtid,self.guid);
+		self.guidevtmaps.insert(evthd,self.guid);
 		Ok(())
 	}
 
@@ -107,24 +163,19 @@ impl EvtMain {
 		Ok(())
 	}
 
-	pub fn remove_event(&mut self,bv :Arc<*mut dyn EvtCall>) -> Result<(),Box<dyn Error>> {
-		let evtid :u64;
-		let b = Arc::as_ptr(&bv);
-		unsafe {
-			evtid = (&(*(*b))).get_evt();
-		}
+	pub fn remove_event(&mut self,evthd :u64) -> Result<(),Box<dyn Error>> {
 
 		let curguid :u64;
-		match self.guidevtmaps.get(&evtid) {
+		match self.guidevtmaps.get(&evthd) {
 			Some(_v) => {
 				curguid = *_v;
 			},
 			None => {
-				evtcall_new_error!{MainLoopWindowsError,"cannot found 0x{:x} evtid",evtid}
+				evtcall_new_error!{MainLoopWindowsError,"cannot found 0x{:x} evtid",evthd}
 			}
 		}
 
-		self.guidevtmaps.remove(&evtid);
+		self.guidevtmaps.remove(&evthd);
 		self.evtmaps.remove(&curguid);
 		Ok(())
 	}
@@ -132,14 +183,8 @@ impl EvtMain {
 	fn get_handles(&self) -> (Vec<HANDLE>,Vec<u64>) {
 		let mut rethdls :Vec<HANDLE> = Vec::new();
 		let mut retguids :Vec<u64> = Vec::new();
-		for (g,v) in self.evtmaps.iter() {
-			let b = Arc::as_ptr(&v.evt);
-			let evtid :u64;
-			unsafe {
-				evtid = (&(*(*b))).get_evt();
-			}
-
-			rethdls.push(evtid as HANDLE);
+		for (g,v) in self.guidevtmaps.iter() {
+			rethdls.push(*v as HANDLE);
 			retguids.push(*g);
 		}
 
@@ -179,36 +224,37 @@ impl EvtMain {
 			let timeout = self.get_timeout(30000);
 			let dret :DWORD;
 
-			unsafe {
-				dret = WaitForMultipleObjectsEx(handles.len() as DWORD,handles.as_ptr(),FALSE,timeout,FALSE);
+			if handles.len() > 0 {
+				unsafe {
+					dret = WaitForMultipleObjectsEx(handles.len() as DWORD,handles.as_ptr(),FALSE,timeout,FALSE);
+				}				
+			} else {
+				assert!(self.timerevt.len() > 0);
+				unsafe {
+					dret = WaitForMultipleObjectsEx(self.timerevt.len() as DWORD, self.timerevt.as_ptr(),FALSE,timeout,FALSE);
+				}
 			}
 
 			let timeguids = self.get_time_guids();
 
-			if dret >= STATUS_WAIT_0 && dret < ( STATUS_WAIT_0 + (handles.len() as DWORD)) {
-				let curguid = guids[(dret as usize) - (STATUS_WAIT_0 as usize)];
-				let mut findev :Option<EvtCallWindows> = None;
-				match self.evtmaps.get(&curguid) {
-					Some(ev) => {
-						findev = Some(ev.clone());
-					},
-					None => {}
-				}
+			if dret >= WAIT_OBJECT_0 && dret < ( WAIT_OBJECT_0 + (handles.len() as DWORD)) {
+				if guids.len() > (dret - WAIT_OBJECT_0) as usize {
+					let curguid = guids[(dret as usize) - (WAIT_OBJECT_0 as usize)];
+					let mut findev :Option<EvtCallWindows> = None;
+					match self.evtmaps.get(&curguid) {
+						Some(ev) => {
+							findev = Some(ev.clone());
+						},
+						None => {}
+					}
 
-				if findev.is_some() {
-					let c = findev.unwrap();
-					let b = Arc::as_ptr(&c.evt);
-					unsafe {
-						let evttype = (&(*(*b))).get_evttype();
-						if (evttype & READ_EVENT) != 0 {
-							(&mut (*(*b))).read(self)?;
-						}
-
-						if (evttype & WRITE_EVENT) != 0 {
-							(&mut (*(*b))).write(self)?;
-						}
-						if (evttype & ERROR_EVENT) != 0 {
-							(&mut (*(*b))).error(self)?;
+					if findev.is_some() {
+						let c = findev.unwrap();
+						let b = Arc::as_ptr(&c.evt);
+						let evttype :u32 = c.evttype;
+						let hd :u64 = c.evthd;
+						unsafe {
+							(&mut (*(*b))).handle(hd,evttype,self)?;
 						}
 					}					
 				}
@@ -227,7 +273,7 @@ impl EvtMain {
 					let c = findtv.unwrap();
 					let b = Arc::as_ptr(&c.timer);
 					unsafe {
-						(&mut (*(*b))).timer(self)?;	
+						(&mut (*(*b))).timer(*g,self)?;	
 					}
 
 					if c.conti {
@@ -242,7 +288,6 @@ impl EvtMain {
 					}
 				}
 			}
-
 		}
 		Ok(())
 	}
@@ -253,6 +298,10 @@ impl EvtMain {
 	}
 
 	pub fn reset_all(&mut self) {
+		for e in self.timerevt.iter_mut() {
+			close_handle_safe!(*e,"timerevt");
+		}
+		self.timerevt = Vec::new();
 		self.guid = 1;
 		self.exited = 0;
 		self.evtmaps = HashMap::new();
