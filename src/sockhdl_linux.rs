@@ -205,6 +205,26 @@ impl TcpSockHandle {
 		Ok(retv)
 	}
 
+	fn _get_sock_name(&mut self) -> Result<(),Box<dyn Error>> {
+		let mut name :libc::sockaddr_in = unsafe {std::mem::zeroed()};
+		let mut reti :i32;
+		unsafe {
+			let _nameptr = (&mut name as *mut libc::sockaddr_in) as *mut libc::sockaddr;
+			let _namelen = std::mem::size_of::<libc::sockaddr_in>();
+			reti = libc::getsockname(self.sock,_nameptr,_namelen);
+		}
+
+		if reti < 0 {
+			reti = get_errno!();
+			evtcall_new_error!{SockHandleError,"getsockname error {}",reti}
+		}
+
+		let ipv4 :std::net::Ipv4Addr = std::net::Ipv4Addr::from_bits(name.sin_addr.s_addr);
+		retv.localaddr = ipv4.to_string();
+		retv.localport = u16::from_be(name.sin_port) as u32;
+		Ok(())
+	}
+
 	pub fn connect_client(ipaddr :&str,port :u32,localip :&str, localport :u32, connected :bool) -> Result<Self,Box<dyn Error>> {
 		let mut retv :Self = Self::_default_new(TcpSockType::SockClientType);
 		let mut reti :i32;
@@ -258,11 +278,44 @@ impl TcpSockHandle {
 		}
 
 		if connected && inconn > 0 {
+			let mut rdset :libc::fd_set = unsafe {std::mem::zeroed()};
 			loop {
-				
+				unsafe {
+					let _rdptr = &mut rdset as *mut libc::fd_set;
+					libc::FD_ZERO(_rdptr);
+					libc::FD_SET(retv.sock,_rdptr);
+					let _nullptr = std::ptr::null_mut::<libc::fd_set>();
+					let _timenull = std::ptr::null_mut::<libc::timeval>();
+					reti = libc::select(retv.sock + 1,_rdptr,_nullptr,_nullptr,_timenull);
+				}
+
+				if reti < 0 {
+					reti = get_errno!();
+					evtcall_new_error!{SockHandleError,"select error {}",reti}
+				} else if reti == 0 {
+					continue;
+				} else {
+					error = 1;
+					unsafe {
+						let _eptr = (&mut error as *mut libc::c_int) as *mut libc::c_char;
+						let _elen = std::mem::size_of::<libc::c_int>() as u32;
+						reti = libc::getsockopt(retv.sock,libc::SOL_SOCKET,libc::SO_ERROR,_eptr,_elen);
+					}
+
+					if reti < 0 {
+						reti = get_errno!();
+						evtcall_new_error!{SockHandleError,"getsockopt SO_ERROR error {}",reti}
+					}
+					if error != 0 {
+						evtcall_new_error!{SockHandleError,"connect [{}:{}] error {}",ipaddr,port,error}
+					}
+					inconn = 0;
+					retv._get_sock_name()?;
+					break;
+				}
 			}
 		}
-
+		retv.inconn = inconn;
 
 		Ok(retv)
 	}
