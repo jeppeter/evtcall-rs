@@ -23,17 +23,12 @@ use super::consts::*;
 use std::error::Error;
 use crate::logger::*;
 use crate::*;
+use crate::sockhdl::{TcpSockType};
 
 evtcall_error_class!{SockHandleError}
 
 const INET_ADDRSTRLEN :usize = 16;
 
-#[allow(dead_code)]
-enum TcpSockType {
-	SockNoneType,
-	SockClientType,
-	SockServerType,
-}
 
 pub struct TcpSockHandle {
 	mtype : TcpSockType,
