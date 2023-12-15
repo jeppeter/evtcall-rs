@@ -65,7 +65,7 @@ pub struct TcpSockHandle {
 
 impl Drop for TcpSockHandle {
 	fn drop(&mut self) {
-		self.free();
+		self.close();
 	}
 }
 
@@ -205,29 +205,46 @@ macro_rules! cancel_io_safe {
 }
 
 impl TcpSockHandle {
-	pub fn free(&mut self) {
-		match self.mtype {
-			TcpSockType::SockClientType => {
-				cancel_io_safe!(self.inconn,self.sock,self.connov,"connov");
-				close_handle_safe!(self.connov.hEvent,"connov handle");
-			},
-			TcpSockType::SockServerType => {
-				cancel_io_safe!(self.inacc,self.sock,self.accov,"accov");
-				close_handle_safe!(self.accov.hEvent,"accov handle");
-			},
-			TcpSockType::SockNoneType => {
+	pub fn close(&mut self) {
 
-			},
-		}
+		self.mtype = TcpSockType::SockNoneType;
+		cancel_io_safe!(self.inconn,self.sock,self.connov,"connov");
+		close_handle_safe!(self.connov.hEvent,"connov handle");
 
 		cancel_io_safe!(self.inrd,self.sock,self.rdov,"rdov");
-		close_handle_safe!(self.rdov.hEvent,"rdov handle");
+		close_handle_safe!(self.rdov.hEvent,"rdov handle");		
 
 		cancel_io_safe!(self.inwr,self.sock,self.wrov,"wrov");
 		close_handle_safe!(self.wrov.hEvent,"wrov handle");
 
-		close_socket_safe!(self.sock,"sock handle");
+		cancel_io_safe!(self.inacc,self.sock,self.accov,"accov");
+		close_handle_safe!(self.accov.hEvent,"accov handle");
+
 		close_socket_safe!(self.accsock,"accsock handle");
+		close_socket_safe!(self.sock,"sock handle");
+
+		self.acceptfunc = None;
+		self.connexfunc = None;
+
+		self.localaddr = "".to_string();
+		self.localport = 0;
+
+		self.peeraddr = "".to_string();
+		self.peerport = 0;
+
+		self.ooaccrd = 0;
+		self.accrdbuf = Vec::new();
+
+		self.oordbuf = Vec::new();
+		self.oordlen = 0;
+
+		self.rdptr = std::ptr::null_mut::<i8>();
+		self.rdlen = 0;
+		self.wrptr = std::ptr::null_mut::<i8>();
+		self.wrlen = 0;
+
+		self.iscloseerr = false;
+
 
 
 		return;
@@ -928,6 +945,59 @@ impl TcpSockHandle {
 		}
 		Ok(completed)
 	}
+
+	pub fn read(&mut self,rbuf :*mut u8, rlen :u32) -> Result<i32,Box<dyn Error>> {
+		if self.inacc > 0 || self.inconn >0 || self.inrd > 0 {
+			evtcall_new_error!{SockHandleError,"not valid state"}
+		}
+
+		if self.sock == INVALID_SOCKET {
+			evtcall_new_error!{SockHandleError,"closed socket"}
+		}
+
+		assert!(self.rdptr == std::ptr::null_mut::<i8>());
+		assert!(self.rdlen == 0);
+
+		self.rdptr = rbuf as *mut i8;
+		self.rdlen = rlen;
+		self.inrd = 1;
+
+		self._inner_read()?;
+		let mut completed :i32 = 1;
+
+		if self.inrd > 0 {
+			completed = 0;
+		}
+
+		Ok(completed)
+	}
+
+	pub fn write(&mut self,wbuf :*mut u8, wlen :u32) -> Result<i32,Box<dyn Error>> {
+		if self.inacc > 0 || self.inconn >0 || self.inwr > 0 {
+			evtcall_new_error!{SockHandleError,"not valid state"}
+		}
+
+		if self.sock == INVALID_SOCKET {
+			evtcall_new_error!{SockHandleError,"closed socket"}
+		}
+
+		assert!(self.wrptr == std::ptr::null_mut::<i8>());
+		assert!(self.wrlen == 0);
+
+		self.wrptr = wbuf as *mut i8;
+		self.wrlen = wlen;
+		self.inwr = 1;
+
+		self._inner_write()?;
+		let mut completed :i32 = 1;
+
+		if self.inwr > 0 {
+			completed = 0;
+		}
+
+		Ok(completed)
+	}
+
 
 }
 
