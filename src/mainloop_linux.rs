@@ -63,7 +63,7 @@ pub struct EvtMain {
 
 impl Drop for EvtMain {
 	fn drop(&mut self) {
-		self.reset_all();
+		self.close();
 	}
 }
 
@@ -383,7 +383,7 @@ impl EvtMain {
 	}
 
 	#[allow(unused_variables)]
-	pub fn reset_all(&mut self) {
+	pub fn close(&mut self) {
 		if self.epollfd >= 0 {
 			unsafe {
 				libc::close(self.epollfd);	

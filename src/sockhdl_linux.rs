@@ -1,6 +1,6 @@
 
 
-use crate::sockhdl::{TcpSockType};
+use crate::sockhdltype::{TcpSockType};
 use std::error::Error;
 use crate::logger::*;
 use crate::*;

@@ -23,7 +23,7 @@ use super::consts::*;
 use std::error::Error;
 use crate::logger::*;
 use crate::*;
-use crate::sockhdl::{TcpSockType};
+use crate::sockhdltype::{TcpSockType};
 
 evtcall_error_class!{SockHandleError}
 

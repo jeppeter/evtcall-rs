@@ -116,7 +116,7 @@ pub struct EvtMain {
 
 impl Drop for EvtMain {
 	fn drop(&mut self) {
-		self.reset_all();
+		self.close();
 	}
 }
 
@@ -297,7 +297,7 @@ impl EvtMain {
 		Ok(())
 	}
 
-	pub fn reset_all(&mut self) {
+	pub fn close(&mut self) {
 		for e in self.timerevt.iter_mut() {
 			close_handle_safe!(*e,"timerevt");
 		}

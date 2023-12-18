@@ -1,7 +1,8 @@
 
-pub (crate) enum TcpSockType {
-	SockNoneType,
-	SockClientType,
-	SockServerType,
-	SockServerConnType,
-}
+
+
+#[cfg(target_os = "linux")]
+include!("sockhdl_linux.rs");
+
+#[cfg(target_os = "windows")]
+include!("sockhdl_windows.rs");
