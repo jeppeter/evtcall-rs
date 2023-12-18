@@ -2,7 +2,7 @@
 
 
 struct EvtChatClient {
-
+	sock :TcpSockHandle,	
 }
 
 impl EvtCall for EvtChatClient {
@@ -28,7 +28,6 @@ struct EvtChatServer {
 
 impl EvtCall for EvtChatServer {
 	fn handle(&mut self,evthd :u64, evttype :u32,evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
-		if evthd == self.sock.get_accept
 		Ok(())
 	}
 }

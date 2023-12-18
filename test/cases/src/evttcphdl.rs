@@ -32,7 +32,7 @@ use evtcall::mainloop::EvtMain;
 use evtcall::sockhdl::TcpSockHandle;
 
 #[cfg(target_os = "windows")]
-include!("evtchat_windows.rs")
+include!("evtchat_windows.rs");
 
 
 fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {
