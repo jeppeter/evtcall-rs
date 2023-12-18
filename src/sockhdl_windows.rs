@@ -485,6 +485,11 @@ impl TcpSockHandle {
 		let mut dret :DWORD = 0;
 		let ret :u32;
 
+		match self.mtype {
+			TcpSockType::SockServerType => {},
+			_ => {evtcall_new_error!{SockHandleError,"not valid type for accept"}}
+		}
+
 		if self.inacc > 0 {
 			let bret :BOOL;
 			set_errno!(0);
@@ -565,9 +570,18 @@ impl TcpSockHandle {
 	}
 
 	pub fn accept_socket(&mut self) -> Result<Self,Box<dyn Error>> {
-		let mut retv :Self = Self::_default_new(TcpSockType::SockServerType);
+		let mut retv :Self = Self::_default_new(TcpSockType::SockServerConnType);
 		let sret :c_int;
 		let sv :u32;
+		match self.mtype {
+			TcpSockType::SockServerType => {
+
+			},
+			_ => {
+				evtcall_new_error!{SockHandleError,"not valid type for accept socket"}
+			}
+		}
+
 		if self.accsock == INVALID_SOCKET || self.inacc > 0 {
 			evtcall_new_error!{SockHandleError,"not valid state for accept socket"}
 		}

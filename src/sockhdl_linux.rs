@@ -205,23 +205,100 @@ impl TcpSockHandle {
 		Ok(retv)
 	}
 
+	pub fn complete_accept(&mut self) -> Result<i32,Box<dyn Error>> {
+		let mut completed :i32= 1;
+		match self.mtype {
+			TcpSockType::SockServerType => {
+				if self.accsock < 0 {
+					self._accept_inner()?;
+				}
+			},
+			_ => {}
+		}
+
+		if self.inacc > 0 {
+			completed = 0;
+		}
+		Ok(completed)
+	}
+
+	fn _get_peer_name(&mut self) -> Result<(),Box<dyn Error>> {
+		let mut name :libc::sockaddr_in = unsafe {std::mem::zeroed()};
+		let mut reti :i32;
+		unsafe {
+			let _nameptr = (&mut name as *mut libc::sockaddr_in) as *mut libc::sockaddr;
+			let mut _namelen = std::mem::size_of::<libc::sockaddr_in>() as u32;
+			reti = libc::getpeername(self.sock,_nameptr,&mut _namelen);
+		}
+		if reti < 0 {
+			reti = get_errno!();
+			evtcall_new_error!{SockHandleError,"get peer name error {}",reti}
+		}
+
+		let (us,uu) = self._trans_sockaddr_in(&name)?;
+		self.peeraddr = format!("{}",us);
+		self.peerport = uu;
+		Ok(())
+	}
+
+	pub fn accept_socket(&mut self) -> Result<Self,Box<dyn Error>> {
+		let mut retv :Self = Self::_default_new(TcpSockType::SockServerConnType);
+		match self.mtype {
+			TcpSockType::SockServerType => {},
+			_ => {evtcall_new_error!{SockHandleError,"not valid type to accept"}}
+		}
+
+		if self.accsock < 0 {
+			self._accept_inner()?;
+			if self.accsock < 0{
+				evtcall_new_error!{SockHandleError,"not accepted"}
+			}
+		}
+		assert!(self.inacc == 0);
+		retv.sock = self.accsock;
+		self.accsock = DEFAULT_SOCKET;
+
+
+		retv.localport = self.localport;
+		retv.localaddr = format!("{}",self.localaddr);
+
+		retv._get_peer_name()?;
+		self._accept_inner()?;
+
+		Ok(retv)
+	}
+
+	fn _trans_sockaddr_in(&self,name :&libc::sockaddr_in) -> Result<(String,u32),Box<dyn Error>> {
+		let mut a :Vec<u8> = vec![0,0,0,0];
+		let mut idx :usize=0;
+
+		while idx < a.len() {
+			a[idx] = ((name.sin_addr.s_addr >> (idx*8)) & 0xff) as u8;
+			idx += 1;
+		}
+
+		let ipv4 :std::net::Ipv4Addr = std::net::Ipv4Addr::new(a[0],a[1],a[2],a[3]);
+		let rets :String = ipv4.to_string();
+		let retu :u32 = u16::from_be(name.sin_port) as u32;
+		Ok((rets,retu))		
+	}
+
 	fn _get_sock_name(&mut self) -> Result<(),Box<dyn Error>> {
 		let mut name :libc::sockaddr_in = unsafe {std::mem::zeroed()};
 		let mut reti :i32;
 		unsafe {
 			let _nameptr = (&mut name as *mut libc::sockaddr_in) as *mut libc::sockaddr;
-			let _namelen = std::mem::size_of::<libc::sockaddr_in>();
-			reti = libc::getsockname(self.sock,_nameptr,_namelen);
+			let mut _namelen = std::mem::size_of::<libc::sockaddr_in>() as u32;
+			reti = libc::getsockname(self.sock,_nameptr,&mut _namelen);
 		}
 
 		if reti < 0 {
 			reti = get_errno!();
 			evtcall_new_error!{SockHandleError,"getsockname error {}",reti}
 		}
-
-		let ipv4 :std::net::Ipv4Addr = std::net::Ipv4Addr::from_bits(name.sin_addr.s_addr);
-		retv.localaddr = ipv4.to_string();
-		retv.localport = u16::from_be(name.sin_port) as u32;
+		let (us,uu) = self._trans_sockaddr_in(&name)?;
+		self.localaddr = format!("{}",us);
+		self.localport = uu;
 		Ok(())
 	}
 
@@ -271,7 +348,7 @@ impl TcpSockHandle {
 		}
 		if reti < 0 {
 			reti = get_errno!();
-			if reti != -libc::EINPGROGRESS {
+			if reti != -libc::EINPROGRESS {
 				evtcall_new_error!{SockHandleError,"connect error {}", reti}	
 			}
 			inconn = 1;
@@ -297,9 +374,9 @@ impl TcpSockHandle {
 				} else {
 					error = 1;
 					unsafe {
-						let _eptr = (&mut error as *mut libc::c_int) as *mut libc::c_char;
-						let _elen = std::mem::size_of::<libc::c_int>() as u32;
-						reti = libc::getsockopt(retv.sock,libc::SOL_SOCKET,libc::SO_ERROR,_eptr,_elen);
+						let _eptr = (&mut error as *mut libc::c_int) as *mut libc::c_void;
+						let mut _elen = std::mem::size_of::<libc::c_int>() as u32;
+						reti = libc::getsockopt(retv.sock,libc::SOL_SOCKET,libc::SO_ERROR,_eptr,&mut _elen);
 					}
 
 					if reti < 0 {
@@ -326,6 +403,157 @@ impl TcpSockHandle {
 			retv = self.sock as u64;
 		}
 		return retv;
+	}
+
+	pub fn complete_connect(&mut self) -> Result<i32,Box<dyn Error>> {
+		let mut completed :i32 = 1;
+		match self.mtype {
+			TcpSockType::SockClientType => {
+				if self.inconn > 0 {
+					let mut errval :libc::c_int = 1;
+					let mut reti :i32;
+					let mut check :bool = true;
+					unsafe {
+						let _eptr = (&mut errval as *mut libc::c_int) as *mut libc::c_void;
+						let mut _errlen = std::mem::size_of::<libc::c_int>() as u32;
+						reti = libc::getsockopt(self.sock,libc::SOL_SOCKET,libc::SO_ERROR,_eptr,&mut _errlen);
+					}
+					if reti < 0 {
+						reti = get_errno!();
+						if reti != -libc::EINPROGRESS {
+							evtcall_new_error!{SockHandleError,"cannot get sockopt error {}",reti}
+						}
+						check = false;
+					}
+					if check {
+						if errval != 0 {
+							evtcall_new_error!{SockHandleError,"connect {}:{} error {}",self.peeraddr,self.peerport, errval}
+						}
+						self.inconn = 0;						
+					}
+				}
+			},
+			_ => {},
+		}
+
+		if self.inconn > 0 {
+			completed = 0;
+		}
+		Ok(completed)
+	}
+
+	fn _inner_read(&mut self) -> Result<(),Box<dyn Error>> {
+		let mut reti :isize;
+		let erri :i32;
+		loop {
+			unsafe {
+				let _rdptr = self.rdptr as *mut libc::c_char as * mut libc::c_void;
+				let _rdlen = self.rdlen as usize;
+				reti = libc::recv(self.sock,_rdptr,_rdlen,libc::MSG_DONTWAIT);
+			}
+			if reti < 0 {
+				erri = get_errno!() ;
+				if erri == - libc::EAGAIN || erri == -libc::EWOULDBLOCK {
+					return Ok(());
+				}
+
+				evtcall_new_error!{SockHandleError,"read remote [{}:{}] => local [{}:{}] error {}", self.peeraddr,self.peerport,self.localaddr,self.localport,erri}
+			}
+
+			self.rdptr = unsafe{self.rdptr.offset(reti)};
+			self.rdlen -= reti as u32;
+			if self.rdlen == 0 {
+				self.rdptr = std::ptr::null_mut::<u8>();
+				self.inrd = 0;
+				return Ok(());
+			}
+		}
+	}
+
+	pub fn complete_read(&mut self) -> Result<i32,Box<dyn Error>> {
+		let mut completed :i32 = 1;
+		if self.inrd > 0 {
+			self._inner_read()?;
+		}
+		if self.inrd > 0 {
+			completed = 0;
+		}
+		Ok(completed)
+	}
+
+	fn _inner_write(&mut self) -> Result<(),Box<dyn Error>> {
+		let mut reti :isize;
+		let erri :i32;
+		loop {
+			unsafe {
+				let _wrptr = self.wrptr as *mut libc::c_char as * mut libc::c_void;
+				let _wrlen = self.wrlen as usize;
+				reti = libc::send(self.sock,_wrptr,_wrlen,libc::MSG_DONTWAIT);
+			}
+			if reti < 0 {
+				erri = get_errno!() ;
+				if erri == - libc::EAGAIN || erri == -libc::EWOULDBLOCK {
+					return Ok(());
+				}
+
+				evtcall_new_error!{SockHandleError,"write local [{}:{}] => remote [{}:{}] error {}",self.localaddr,self.localport,self.peeraddr,self.peerport,erri}
+			}
+
+			self.wrptr = unsafe{self.wrptr.offset(reti)};
+			self.wrlen -= reti as u32;
+			if self.wrlen == 0 {
+				self.wrptr = std::ptr::null_mut::<u8>();
+				self.inwr = 0;
+				return Ok(());
+			}
+		}
+	}
+
+	pub fn complete_write(&mut self) -> Result<i32,Box<dyn Error>> {
+		let mut completed :i32 = 1;
+		if self.inwr > 0 {
+			self._inner_write()?;
+		}
+		if self.inwr > 0 {
+			completed = 0;
+		}
+		Ok(completed)
+	}
+
+	pub fn read(&mut self,rbuf :*mut u8, rlen :u32) -> Result<i32,Box<dyn Error>> {
+		if self.inrd > 0 || self.inacc > 0 || self.inconn > 0 || self.sock < 0 {
+			evtcall_new_error!{SockHandleError,"invalid state for sock read"}
+		}
+		self.rdptr = rbuf;
+		self.rdlen = rlen;
+		self.inrd = 1;
+
+		self._inner_read()?;
+		let completed :i32;
+		if self.inrd > 0 {
+			completed = 0;
+		} else {
+			completed = 1;
+		}
+		Ok(completed)
+	}
+
+	pub fn write(&mut self,wbuf :*mut u8, wlen :u32) -> Result<i32,Box<dyn Error>> {
+		if self.inwr > 0 || self.inacc > 0 || self.inconn > 0 || self.sock < 0 {
+			evtcall_new_error!{SockHandleError,"invalid state for sock write"}
+		}
+		self.wrptr = wbuf;
+		self.wrlen = wlen;
+		self.inwr = 1;
+
+		self._inner_write()?;
+		let completed :i32;
+		if self.inwr > 0 {
+			completed = 0;
+		} else {
+			completed = 1;
+		}
+		Ok(completed)
 	}
 
 	pub fn get_read_handle(&self) -> u64 {
@@ -362,4 +590,38 @@ impl TcpSockHandle {
 		self.peeraddr = "".to_string();
 		self.peerport = 0;
 	}
+
+	pub fn is_accept_mode(&self) -> bool {
+		let mut retv :bool = false;
+		if self.inacc > 0 {
+			retv = true;
+		}
+		return retv;
+	}
+
+	pub fn is_connect_mode(&self) -> bool {
+		let mut retv :bool = false;
+		if self.inconn > 0 {
+			retv = true;
+		}
+		return retv;
+	}
+
+	pub fn is_read_mode(&self) -> bool {
+		let mut retv :bool = false;
+		if self.inrd > 0 {
+			retv = true;
+		}
+		return retv;
+	}
+
+	pub fn is_write_mode(&self) -> bool {
+		let mut retv :bool = false;
+		if self.inwr > 0 {
+			retv = true;
+		}
+		return retv;
+	}
+
+
 }
