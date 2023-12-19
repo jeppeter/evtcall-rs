@@ -39,16 +39,14 @@ extargs_error_class!{EvtChatError}
 #[cfg(target_os = "windows")]
 include!("evtchat_windows.rs");
 
-lazy_static! {
-	static ref DEFAULT_EVCHAT_IPADDR :String = "127.0.0.1".to_string();
-}
 
+
+const  DEFAULT_EVCHAT_IPADDR :&str = "127.0.0.1";
 const DEFAULT_EVCHAT_PORT :u32 = 4012;
-
 
 fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {
 	let mut evtmain :EvtMain = EvtMain::new(0)?;
-	let mut ipaddr :String = format!("{}",*DEFAULT_EVCHAT_IPADDR);
+	let mut ipaddr :String = format!("{}",DEFAULT_EVCHAT_IPADDR);
 	let mut port :u32 = DEFAULT_EVCHAT_PORT;
 	let mut evcli :EvtChatClient;
 	let sarr :Vec<String>;
@@ -70,7 +68,24 @@ fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 
 #[allow(unused_variables)]
 fn evchatsvr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {
+	let mut evtmain :EvtMain = EvtMain::new(0)?;
+	let mut ipaddr :String = format!("{}",DEFAULT_EVCHAT_IPADDR);
+	let mut port :u32 = DEFAULT_EVCHAT_PORT;
+	let mut evsvr :EvtChatServer;
+	let sarr :Vec<String>;
+	init_log(ns.clone())?;
+	sarr = ns.get_array("subnargs");
+	if sarr.len() > 0 {
+		port = parse_u64(&sarr[0])? as u32;
+	}
+	if sarr.len() > 1 {
+		ipaddr = format!("{}",sarr[1]);
+	}
 
+	evsvr = EvtChatServer::bind_server(&ipaddr,port,5,&mut evtmain)?;
+	let _ = evtmain.main_loop()?;
+	evsvr.close();
+	evtmain.close();
 	Ok(())
 }
 
@@ -85,7 +100,7 @@ pub fn load_evchat_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 			"$" : "*"
 		}}
 	}}
-	"#,DEFAULT_EVCHAT_PORT,*DEFAULT_EVCHAT_IPADDR,DEFAULT_EVCHAT_PORT);
+	"#,DEFAULT_EVCHAT_PORT,DEFAULT_EVCHAT_IPADDR,DEFAULT_EVCHAT_PORT);
 	extargs_load_commandline!(parser,&cmdline)?;
 	Ok(())
 }
