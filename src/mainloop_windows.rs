@@ -142,7 +142,6 @@ impl EvtMain {
 		Ok(self.guid)
 	}
 
-	#[allow(unused_variables)]
 	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>,evthd :u64,evttype :u32) -> Result<(),Box<dyn Error>> {
 		self.guid += 1;
 		let nevt :EvtCallWindows = EvtCallWindows::new(bv,evthd,evttype)?;
@@ -151,33 +150,38 @@ impl EvtMain {
 		Ok(())
 	}
 
-	pub fn remove_timer(&mut self,guid:u64) -> Result<(),Box<dyn Error>> {
+	pub fn remove_timer(&mut self,guid:u64) -> i32 {
+		let mut removed : i32 = 0;
 		match self.timermaps.get(&guid) {
 			Some(_ev) => {
 			},
 			None => {
-				evtcall_new_error!{MainLoopWindowsError,"not get timer {} timer",guid}
+				evtcall_log_error!("not get timer {} timer",guid);
+				return removed;
 			}
 		}
 		self.timermaps.remove(&guid);
-		Ok(())
+		removed = 1;
+		return removed;
 	}
 
-	pub fn remove_event(&mut self,evthd :u64) -> Result<(),Box<dyn Error>> {
-
+	pub fn remove_event(&mut self,evthd :u64) -> i32 {
+		let mut removed :i32 = 0;
 		let curguid :u64;
 		match self.guidevtmaps.get(&evthd) {
 			Some(_v) => {
 				curguid = *_v;
 			},
 			None => {
-				evtcall_new_error!{MainLoopWindowsError,"cannot found 0x{:x} evtid",evthd}
+				evtcall_log_error!("cannot found 0x{:x} evtid",evthd);
+				return removed;
 			}
 		}
 
 		self.guidevtmaps.remove(&evthd);
 		self.evtmaps.remove(&curguid);
-		Ok(())
+		removed = 1;
+		return removed;
 	}
 
 	fn get_handles(&self) -> (Vec<HANDLE>,Vec<u64>) {
@@ -298,6 +302,59 @@ impl EvtMain {
 	}
 
 	pub fn close(&mut self) {
+		let mut guids :Vec<u64> = Vec::new();
+		let mut idx :usize;
+
+		for (k,_) in self.evtmaps.iter() {
+			guids.push(*k);
+		}
+
+		idx = 0;
+		while idx < guids.len() {
+			let mut findev :Option<EvtCallWindows> = None;
+			match self.evtmaps.get(&guids[idx]) {
+				Some(ev) => {
+					findev = Some(ev.clone());
+				},
+				None => {}
+			}
+
+			if findev.is_some() {
+				let c = findev.unwrap();
+				let b = Arc::as_ptr(&c.evt);
+				let evttype :u32 = c.evttype;
+				let hd :u64 = c.evthd;
+				unsafe {
+					(&mut (*(*b))).close_event(hd,evttype,self);
+				}
+			}
+			idx += 1;
+		}
+
+		guids = Vec::new();
+		for (k,_) in self.timermaps.iter() {
+			guids.push(*k);
+		}
+
+		for g in guids.iter() {
+			let  mut findtv :Option<EvtTimerWindows> = None;
+			match self.timermaps.get(g) {
+				Some(cv) => {
+					findtv = Some(cv.clone());
+				},
+				None => {}
+			}
+
+			if findtv.is_some() {
+				let c = findtv.unwrap();
+				let b = Arc::as_ptr(&c.timer);
+				unsafe {
+					(&mut (*(*b))).close_timer(*g,self);	
+				}
+			}
+		}
+
+
 		for e in self.timerevt.iter_mut() {
 			close_handle_safe!(*e,"timerevt");
 		}

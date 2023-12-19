@@ -149,16 +149,73 @@ impl EvtCall for EvtChatClient {
 		}
 		Ok(())
 	}	
+
+	fn close_event(&mut self,_evthd :u64, _evttype :u32, _evtmain :&mut EvtMain)  {
+		self.close_event_inner();
+		return;
+	}
 }
 
 impl EvtTimer for EvtChatClient {
 	fn timer(&mut self,_timerguid :u64,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
 		return self.connect_timeout();
 	}
+
+	fn close_timer(&mut self, _guid :u64, _evtmain :&mut EvtMain) {
+		self.close_timer_inner();
+		return;
+	}
 }
 
 
 impl EvtChatClient {
+
+	fn close_event_inner(&mut self) {
+		self.stdinrd.close();
+		self.sock.close();
+
+		if self.insertconn > 0 {
+			unsafe {
+				let _ =(*self.evmain).remove_event(self.connhd);
+			}
+			self.insertconn = 0;
+		}
+
+		if self.insertrd > 0 {
+			unsafe {
+				let _ = (*self.evmain).remove_event(self.rdhd);
+			}
+			self.insertrd = 0;
+		}
+
+		if self.insertwr > 0 {
+			unsafe {
+				let _ = (*self.evmain).remove_event(self.wrhd);
+			}
+			self.insertwr = 0;
+		}
+
+		if self.insertstdinrd > 0 {
+			unsafe {
+				let _ = (*self.evmain).remove_event(self.stdinrdhd);
+			}
+			self.insertstdinrd = 0;
+		}
+
+		self.check_clear_evmain();
+		return;
+	}
+	fn close_timer_inner(&mut self) {
+		if self.insertconntimeout > 0 {
+			unsafe {
+				let _ = (*(self.evmain)).remove_timer(self.connguid);
+			}
+			self.insertconntimeout = 0;
+		}
+		self.check_clear_evmain();
+		return;		
+	}
+
 	fn _conti_write_sock(&mut self) -> Result<(),Box<dyn Error>> {
 		let mut completed :i32 = 0;
 		if self.insertwr == 0 {
@@ -189,7 +246,7 @@ impl EvtChatClient {
 		if completed > 0 {
 			if self.insertwr > 0 {
 				unsafe {
-					(*self.evmain).remove_event(self.wrhd)?;
+					let _ = (*self.evmain).remove_event(self.wrhd);
 				}
 				self.insertwr = 0;
 			}
@@ -218,7 +275,7 @@ impl EvtChatClient {
 				if self.insertwr > 0 {
 					assert!(self.wrhd != INVALID_EVENT_HANDLE);
 					unsafe {
-						(*self.evmain).remove_event(self.wrhd)?;
+						let _ =(*self.evmain).remove_event(self.wrhd);
 					}
 					self.insertwr = 0;
 				}
@@ -296,7 +353,7 @@ impl EvtChatClient {
 
 		if self.insertrd > 0 {
 			unsafe {
-				(*(self.evmain)).remove_event(self.rdhd)?;	
+				(*(self.evmain)).remove_event(self.rdhd);	
 			}
 			
 		}
@@ -334,7 +391,7 @@ impl EvtChatClient {
 		self.sockwbuf = Vec::new();
 		if self.insertwr > 0 {
 			unsafe {
-				(*self.evmain).remove_event(self.wrhd)?;
+				(*self.evmain).remove_event(self.wrhd);
 			}				
 		}
 		self.insertwr = 0;
@@ -382,37 +439,16 @@ impl EvtChatClient {
 		Ok(retv)
 	}
 
+	pub fn check_clear_evmain(&mut self) {
+		if self.insertconntimeout == 0 && self.insertstdinrd == 0 && self.insertrd == 0 && self.insertwr == 0 && self.insertconn == 0 {
+			self.evmain = std::ptr::null_mut::<EvtMain>();
+		}
+		return;		
+	}
+
 	pub fn close(&mut self) {
-		self.stdinrd.close();
-		self.sock.close();
-
-		if self.insertconn > 0 {
-			unsafe {
-				let _ =(*self.evmain).remove_event(self.connhd);
-			}
-			self.insertconn = 0;
-		}
-
-		if self.insertrd > 0 {
-			unsafe {
-				let _ = (*self.evmain).remove_event(self.rdhd);
-			}
-			self.insertrd = 0;
-		}
-
-		if self.insertwr > 0 {
-			unsafe {
-				let _ = (*self.evmain).remove_event(self.wrhd);
-			}
-			self.insertwr = 0;
-		}
-
-		if self.insertstdinrd > 0 {
-			unsafe {
-				let _ = (*self.evmain).remove_event(self.stdinrdhd);
-			}
-			self.insertstdinrd = 0;
-		}
+		self.close_timer_inner();
+		self.close_event_inner();
 
 		self.rdsidx = 0;
 		self.rdeidx = 0;
@@ -430,13 +466,13 @@ impl EvtChatClient {
 		if completed > 0 {
 			if self.insertconn > 0 {
 				unsafe {
-					(*self.evmain).remove_event(self.connhd)?;
+					let _ =(*self.evmain).remove_event(self.connhd);
 				}
 				self.insertconn = 0;
 			}
 			if self.insertconntimeout > 0 {
 				unsafe {
-					(*self.evmain).remove_timer(self.connguid)?;
+					let _ = (*self.evmain).remove_timer(self.connguid);
 				}
 				self.insertconntimeout = 0;
 			}
@@ -466,5 +502,8 @@ struct EvtChatServer {
 impl EvtCall for EvtChatServer {
 	fn handle(&mut self,evthd :u64, evttype :u32,evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
 		Ok(())
+	}
+
+	fn close_event(&mut self,evthd :u64, evttype :u32, evtmain :&mut EvtMain)  {
 	}
 }
