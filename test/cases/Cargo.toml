@@ -23,5 +23,4 @@ sha2 = "^0.10.2"
 
 [target.'cfg(windows)'.dependencies.winapi]
 version = "0.3"
-features = ["winbase", "debugapi", "stringapiset", "winnls", "datetimeapi",
-	"sysinfoapi", "wincred","combaseapi","errhandlingapi", "setupapi"]
+features = ["winbase","stringapiset","debugapi","sysinfoapi","minwindef","errhandlingapi", "setupapi","processenv","consoleapi","wincontypes"]

@@ -885,6 +885,33 @@ impl TcpSockHandle {
 		}
 	}
 
+	pub fn complete_connect(&mut self) -> Result<i32,Box<dyn Error>> {
+		let mut completed :i32=1;
+		let bret :BOOL;
+		let mut dret : DWORD = 0;
+		let reti :i32;
+		if self.inacc > 0 {
+			unsafe {
+				let _hd = self.sock as HANDLE;
+				let _ovptr = &mut self.connov;
+				let _dretptr = &mut dret;
+				bret = GetOverlappedResult(_hd,_ovptr,_dretptr,FALSE);
+			}
+			if bret == FALSE {
+				reti = get_errno!();
+				evtcall_new_error!{SockHandleError,"get connov result error {}",reti}
+			}
+			self.inconn = 0;
+			self._get_self_name()?;
+			self._inner_make_read_write()?;
+		}
+
+		if self.inacc > 0 {
+			completed = 0;
+		}
+		Ok(completed)
+	}
+
 
 	pub fn complete_read(&mut self) -> Result<i32,Box<dyn Error>> {
 		let bret :BOOL;

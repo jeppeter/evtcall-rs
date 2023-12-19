@@ -18,6 +18,7 @@ use std::error::Error;
 extargs_error_class!{FileOpError}
 
 
+#[allow(dead_code)]
 pub fn write_file_bytes(fname :&str, byts :&[u8]) -> Result<(),Box<dyn Error>> {
 	if fname.len() == 0 {
 		let res = io::stdout().write_all(byts);
@@ -41,7 +42,7 @@ pub fn write_file_bytes(fname :&str, byts :&[u8]) -> Result<(),Box<dyn Error>> {
 	Ok(())
 }
 
-
+#[allow(dead_code)]
 pub fn read_file_bytes(fname :&str) -> Result<Vec<u8>,Box<dyn Error>> {
 	if fname.len() == 0 {
 		let f = io::stdin();
@@ -72,6 +73,7 @@ pub fn read_file_bytes(fname :&str) -> Result<Vec<u8>,Box<dyn Error>> {
 	}
 }
 
+#[allow(dead_code)]
 pub fn read_file(fname :&str) -> Result<String,Box<dyn Error>> {
 	if fname.len() == 0 {
 		let f = io::stdin();
@@ -102,6 +104,7 @@ pub fn read_file(fname :&str) -> Result<String,Box<dyn Error>> {
 	}
 }
 
+#[allow(dead_code)]
 pub fn get_sha256_data(ind :&[u8]) -> Vec<u8> {
     let mut hasher = Sha256::new();
     hasher.update(&ind);

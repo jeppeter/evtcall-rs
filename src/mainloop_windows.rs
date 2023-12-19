@@ -121,7 +121,7 @@ impl Drop for EvtMain {
 }
 
 impl EvtMain {
-	pub fn new() -> Result<Self,Box<dyn Error>> {
+	pub fn new(_flags :u32) -> Result<Self,Box<dyn Error>> {
 		let mut retv :Self = Self {
 			timerevt : Vec::new(),
 			evtmaps : HashMap::new(),

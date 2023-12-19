@@ -43,6 +43,7 @@ pub fn str_to_c_wstr(s: &str) -> Option<Box<[u16]>> {
 
 
 
+#[allow(dead_code)]
 pub fn wstr_to_str(s: &[u16]) -> String {
     if s.len() == 0 {
         "".to_string()
