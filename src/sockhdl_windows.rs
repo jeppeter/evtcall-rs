@@ -1068,7 +1068,6 @@ impl TcpSockHandle {
 	}
 }
 
-#[allow(dead_code)]
 pub fn init_socket() -> Result<(),Box<dyn Error>> {
 	let sockver :WORD;
 	let mut wsdata :WSADATA = WSADATA{
@@ -1103,7 +1102,6 @@ pub fn init_socket() -> Result<(),Box<dyn Error>> {
 	Ok(())
 }
 
-#[allow(dead_code)]
 pub fn fini_socket()  {
 	unsafe {
 		WSACleanup();

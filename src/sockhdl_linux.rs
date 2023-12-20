@@ -622,6 +622,11 @@ impl TcpSockHandle {
 		}
 		return retv;
 	}
+}
 
+pub fn init_socket() -> Result<(),Box<dyn Error>> {
+	Ok(())
+}
 
+pub fn fini_socket()  {
 }

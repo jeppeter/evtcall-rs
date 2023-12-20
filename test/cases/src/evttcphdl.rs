@@ -31,7 +31,7 @@ use super::strop::{parse_u64};
 use evtcall::interface::*;
 use evtcall::consts::*;
 use evtcall::mainloop::EvtMain;
-use evtcall::sockhdl::TcpSockHandle;
+use evtcall::sockhdl::{TcpSockHandle,init_socket,fini_socket};
 use std::io::{Write};
 
 use super::exithdl::*;
@@ -62,6 +62,7 @@ fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 		ipaddr = format!("{}",sarr[1]);
 	}
 
+	let _ = init_socket()?;
 	exithd = init_exit_handle()?;
 
 	evcli = EvtChatClient::connect_client(&ipaddr,port,5000,exithd,&mut evtmain)?;
@@ -69,6 +70,7 @@ fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	evcli.close();
 	evtmain.close();
 	fini_exit_handle();
+	fini_socket();
 	Ok(())
 }
 
@@ -89,12 +91,14 @@ fn evchatsvr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 		ipaddr = format!("{}",sarr[1]);
 	}
 
+	let _ = init_socket()?;
 	exithd = init_exit_handle()?;
 	evsvr = EvtChatServer::bind_server(&ipaddr,port,5,exithd,&mut evtmain)?;
 	let _ = evtmain.main_loop()?;	
 	evsvr.close();
 	evtmain.close();
 	fini_exit_handle();
+	fini_socket();
 	Ok(())
 }
 
