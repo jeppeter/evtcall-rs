@@ -57,7 +57,7 @@ unsafe extern "system" fn ctrl_c_handler(ty: u32) -> BOOL {
 			unsafe {
 				SetEvent(HANDLE_EXIT as HANDLE);
 			}
-			debug_trace!("set HANDLE_EXIT");
+			debug_trace!("set HANDLE_EXIT 0x{:x}",HANDLE_EXIT);
 		}
 	}
 	return TRUE;

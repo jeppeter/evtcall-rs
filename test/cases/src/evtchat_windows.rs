@@ -53,6 +53,7 @@ impl StdinRd {
 	pub fn read(&mut self,rdptr :*mut u8) -> Result<i32,Box<dyn Error>> {
 		let mut bret :BOOL;
 		let mut ir :INPUT_RECORD = unsafe{std::mem::zeroed()};
+		let mut dret :DWORD;
 		let retval :i32;
 		loop {
 			unsafe {
@@ -60,26 +61,34 @@ impl StdinRd {
 				let mut _dcnt :DWORD = 0;
 				bret = PeekConsoleInputA(self.rd,_irptr,1,&mut _dcnt);
 			}
+			debug_trace!("PeekConsoleInputA {}",bret);
 			if bret == FALSE {
+				debug_trace!("will return 0");
 				return Ok(0);
 			}
 
+			dret = 0;
 			unsafe {
 				let _irptr = &mut ir as *mut INPUT_RECORD;
-				let mut _dcnt :DWORD = 0;
-				bret = ReadConsoleInputA(self.rd,_irptr,1,&mut _dcnt);
+				let _dptr = &mut dret;
+				bret = ReadConsoleInputA(self.rd,_irptr,1,_dptr);
 			}
 			if bret == FALSE {
 				retval = get_errno!();
 				extargs_new_error!{EvtChatError,"can not ReadConsoleInputA error {}",retval}
 			}
 
-			if ir.EventType == KEY_EVENT &&  unsafe{ir.Event.KeyEvent().bKeyDown} == TRUE {
+			//debug_trace!("dret 0x{:x} EventType 0x{:x} bKeyDown {} TRUE {}",dret,ir.EventType,unsafe{ir.Event.KeyEvent().bKeyDown},TRUE);
+			//debug_buffer_trace!((&ir as *const INPUT_RECORD),std::mem::size_of::<INPUT_RECORD>(),"ir buffer");
+			if dret == 1 &&  ir.EventType == KEY_EVENT &&  unsafe{ir.Event.KeyEvent().bKeyDown} == TRUE {
+				//debug_trace!("ir.Event.KeyEvent().uChar.AsciiChar() {:p}",unsafe {ir.Event.KeyEvent().uChar.AsciiChar()});
+				debug_trace!("AsciiChar 0x{:x}",unsafe{*ir.Event.KeyEvent().uChar.AsciiChar()});
 				if unsafe{*ir.Event.KeyEvent().uChar.AsciiChar()} != 0 {
 					unsafe {*rdptr = *ir.Event.KeyEvent().uChar.AsciiChar() as u8};
 					return Ok(1);
 				}
 			}
+			return Ok(0);
 		}
 	}
 
@@ -138,6 +147,7 @@ impl Drop for EvtChatClient {
 
 impl EvtCall for EvtChatClient {
 	fn handle(&mut self,evthd :u64, _evttype :u32,evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+		debug_trace!("evthd 0x{:x}",evthd);
 		if evthd == self.sock.get_connect_handle() {
 			self.connect_handle()?;
 		} else if evthd == self.sock.get_write_handle() {
@@ -147,6 +157,7 @@ impl EvtCall for EvtChatClient {
 		} else if evthd == self.stdinrd.get_handle() {
 			self.stdin_read_proc()?;
 		} else if evthd == self.exithd {
+			debug_trace!("break_up");
 			return evtmain.break_up();
 		} else {
 			extargs_new_error!{EvtChatError,"not recognize evthd 0x{:x}",evthd}
@@ -221,6 +232,7 @@ impl EvtChatClient {
 			unsafe {
 				let _ = &(*(self.evmain)).remove_timer(self.connguid);
 			}
+			debug_trace!("remove conntimer 0x{:x}",self.connguid);
 			self.insertconntimeout = 0;
 		}
 		self.check_clear_evmain();
@@ -232,7 +244,7 @@ impl EvtChatClient {
 		if self.insertwr == 0 {
 			loop {
 				if self.sockwbuf.len() > 0 {
-					let completed = self.sock.write(self.sockwbuf.as_mut_ptr(),self.sockwbufs.len() as u32)?;
+					let completed = self.sock.write(self.sockwbuf.as_mut_ptr(),self.sockwbuf.len() as u32)?;
 					if completed > 0 {
 						self.sockwbuf = Vec::new();
 					} else {
@@ -272,16 +284,18 @@ impl EvtChatClient {
 		let completed :i32;
 		while idx < self.stdinrdlen {
 			curidx = self.stdinrdsidx + idx;
-			curidx %= self.stdinvecs.len();
+			curidx %= self.stdinvecs.capacity();
 			wbuf.push(self.stdinvecs[curidx]);
 			idx += 1;
 		}
 		self.stdinrdsidx = self.stdinrdeidx;
 		self.stdinrdlen = 0;
+		debug_buffer_trace!(wbuf.as_ptr(),wbuf.len(),"wbuf ");
 
 		if self.sockwbuf.len() == 0 {
 			self.sockwbuf = wbuf.clone();
 			completed = self.sock.write(self.sockwbuf.as_ptr() as *mut u8,self.sockwbuf.len() as u32)?;
+			debug_trace!("write completed {}",completed);
 			if completed > 0 {
 				if self.insertwr > 0 {
 					assert!(self.wrhd != INVALID_EVENT_HANDLE);
@@ -291,6 +305,7 @@ impl EvtChatClient {
 					self.insertwr = 0;
 				}
 				self.sockwbuf = Vec::new();
+				debug_trace!("write over");
 			} else {
 				if self.insertwr == 0 {
 					self.wrhd = self.sock.get_write_handle();
@@ -309,29 +324,44 @@ impl EvtChatClient {
 	}
 
 	pub fn stdin_read_proc(&mut self) -> Result<(),Box<dyn Error>> {
-		loop {
-			if self.rdlen == self.rdvecs.len() {
+		let mut cnt :usize = 0;
+		let maxcnt :usize = 1;
+		while cnt < maxcnt {
+			cnt += 1;
+			if self.stdinrdlen >= (self.stdinvecs.capacity() - 2) {
 				self._sock_write_inner()?;
 			}
 
 			let _rptr = (&mut self.stdinvecs[self.stdinrdeidx]) as *mut u8;
 			let completed = self.stdinrd.read(_rptr)?;
 			if completed > 0 {
+				let lastidx :usize = self.stdinrdeidx;
 				self.stdinrdeidx += 1;
-				self.stdinrdeidx %= self.stdinvecs.len();
+				self.stdinrdeidx %= self.stdinvecs.capacity();
 				self.stdinrdlen += 1;
-			} else {
-				if self.insertstdinrd == 0 {
-					self.stdinrdhd = self.stdinrd.get_handle();
-					unsafe {
-						let _ = &(*self.evmain).add_event(Arc::new(self),self.stdinrdhd,READ_EVENT)?;
-					}
-					self.insertstdinrd = 1;
+
+				if self.stdinvecs[lastidx] == '\r' as u8 {
+					self.stdinvecs[self.stdinrdeidx] = '\n' as u8;
+					self.stdinrdeidx += 1;
+					self.stdinrdeidx %= self.stdinvecs.capacity();
+					self.stdinrdlen += 1;					
 				}
-				self._sock_write_inner()?;
-				return Ok(());
+				debug_trace!("read stdinrdlen 0x{:x}",self.stdinrdlen);
+
+			} else {
+				break;
 			}
 		}
+		if self.insertstdinrd == 0 {
+			self.stdinrdhd = self.stdinrd.get_handle();
+			unsafe {
+				let _ = &(*self.evmain).add_event(Arc::new(self),self.stdinrdhd,READ_EVENT)?;
+			}
+			self.insertstdinrd = 1;
+		}
+		self._sock_write_inner()?;
+		return Ok(());
+
 	}
 
 	fn _write_stdout_inner(&mut self) -> Result<(),Box<dyn Error>> {
@@ -340,7 +370,7 @@ impl EvtChatClient {
 		let mut curidx :usize;
 		while idx < self.rdlen {
 			curidx = self.rdsidx + idx;
-			curidx %= self.rdvecs.len();
+			curidx %= self.rdvecs.capacity();
 			rdvecs.push(self.rdvecs[curidx]);
 			idx += 1;
 		}
@@ -352,30 +382,15 @@ impl EvtChatClient {
 		of.flush()?;
 		Ok(())
 	}
-	pub fn sock_read_proc(&mut self) -> Result<(),Box<dyn Error>> {
-		let mut completed:i32 = self.sock.complete_read()?;
-		if completed == 0 {
-			return Ok(());
-		}
 
-		self.rdeidx += 1;
-		self.rdeidx %= self.rdvecs.len();
-		self.rdlen += 1;
-
-		if self.insertrd > 0 {
-			unsafe {
-				let _ = &(*(self.evmain)).remove_event(self.rdhd);	
-			}
-			
-		}
-		self.insertrd = 0;
-
+	fn _read_sock_inner(&mut self) -> Result<(),Box<dyn Error>> {
 		loop {
-			if self.rdlen == self.rdvecs.len() {
+			if self.rdlen == self.rdvecs.capacity() {
 				self._write_stdout_inner()?;
 			}
+			debug_trace!("rdeidx {}",self.rdeidx);
 			let _rdptr = (&mut self.rdvecs[self.rdeidx]) as *mut u8;
-			completed = self.sock.read(_rdptr,1)?;
+			let completed = self.sock.read(_rdptr,1)?;
 			if completed  == 0 {
 				self._write_stdout_inner()?;
 				break;
@@ -383,15 +398,39 @@ impl EvtChatClient {
 
 			self.rdlen += 1;
 			self.rdeidx += 1;
-			self.rdeidx %= self.rdvecs.len();
+			self.rdeidx %= self.rdvecs.capacity();
+			debug_trace!("rdlen 0x{:x}",self.rdlen);
 		}	
 
-		self.rdhd = self.sock.get_read_handle();
-		unsafe {
-			let _ = &(*self.evmain).add_event(Arc::new(self),self.rdhd,READ_EVENT)?;
+		debug_trace!("_read_sock_inner over");
+		if self.insertrd == 0 {
+			self.rdhd = self.sock.get_read_handle();
+			unsafe {
+				let _ = &(*self.evmain).add_event(Arc::new(self),self.rdhd,READ_EVENT)?;
+			}
+			self.insertrd = 1;			
 		}
-		self.insertrd = 1;
 		Ok(())
+	}
+
+	pub fn sock_read_proc(&mut self) -> Result<(),Box<dyn Error>> {
+		let completed:i32 = self.sock.complete_read()?;
+		if completed == 0 {
+			return Ok(());
+		}
+
+		self.rdeidx += 1;
+		self.rdeidx %= self.rdvecs.capacity();
+		self.rdlen += 1;
+
+		if self.insertrd > 0 {
+			unsafe {
+				let _ = &(*(self.evmain)).remove_event(self.rdhd);	
+			}			
+		}
+		self.insertrd = 0;
+
+		return self._read_sock_inner();
 	}
 
 	pub fn sock_write_proc(&mut self) -> Result<(),Box<dyn Error>> {
@@ -441,19 +480,28 @@ impl EvtChatClient {
 			evmain : (evtmain as *mut EvtMain),
 		};
 
+		unsafe {
+			retv.rdvecs.set_len(RDBUF_SIZE);
+			retv.stdinvecs.set_len(RDBUF_SIZE);
+		}
+
 		if retv.sock.is_connect_mode() {
+			debug_trace!("in connect mode");
 			retv.connhd = retv.sock.get_connect_handle();
 			evtmain.add_event(Arc::new(&mut retv),retv.connhd,WRITE_EVENT)?;
 			retv.insertconn = 1;
 			retv.connguid = evtmain.add_timer(Arc::new(&mut retv),timemills,false)?;
 			retv.insertconntimeout = 1;
+			debug_trace!("connguid 0x{:x} connhd 0x{:x}",retv.connguid,retv.connhd);
 		} else {
+			debug_trace!("will read mode");
 			retv.sock_read_proc()?;
 			retv.stdin_read_proc()?;
 		}
 
 		evtmain.add_event(Arc::new(&mut retv),retv.exithd,READ_EVENT)?;
 		retv.inexit = 1;
+		debug_trace!("insert exithd 0x{:x}",exithd);
 
 		Ok(retv)
 	}
@@ -481,6 +529,7 @@ impl EvtChatClient {
 	}
 
 	pub fn connect_handle(&mut self) -> Result<(),Box<dyn Error>> {
+		debug_trace!("will handle connect");
 		let completed = self.sock.complete_connect()?;
 		if completed > 0 {
 			if self.insertconn > 0 {
@@ -493,10 +542,13 @@ impl EvtChatClient {
 				unsafe {
 					let _ = &(*self.evmain).remove_timer(self.connguid);
 				}
+				debug_trace!("remove conn timer 0x{:x}",self.connguid);
 				self.insertconntimeout = 0;
 			}
 
-			self.sock_read_proc()?;
+			debug_trace!("connect {} => {}",self.sock.get_self_format(),self.sock.get_peer_format());
+
+			self._read_sock_inner()?;
 			self.stdin_read_proc()?;
 		}
 		Ok(())
@@ -550,6 +602,7 @@ impl EvtChatServerConn {
 				if self.sockwbuf.len() > 0 {
 					let _wrptr = self.sockwbuf.as_mut_ptr() ;
 					let _wrlen = self.sockwbuf.len() as u32;
+					debug_buffer_trace!(_wrptr,_wrlen,"write buffer");
 					completed = self.sock.write(_wrptr,_wrlen)?;
 					if completed == 0 {
 						self.wrhd = self.sock.get_write_handle();
@@ -579,7 +632,7 @@ impl EvtChatServerConn {
 
 		while idx < self.rdlen {
 			curidx = self.rdsidx + idx;
-			curidx %= self.rdbuf.len();
+			curidx %= self.rdbuf.capacity();
 			wbuf.push(self.rdbuf[curidx]);
 			idx += 1;
 		}
@@ -619,8 +672,9 @@ impl EvtChatServerConn {
 			}
 
 			self.rdeidx += 1;
-			self.rdeidx %= self.rdbuf.len();
+			self.rdeidx %= self.rdbuf.capacity();
 			self.rdlen += 1;
+			debug_trace!("rdlen 0x{:x}",self.rdlen);
 		}
 	}
 
@@ -640,6 +694,10 @@ impl EvtChatServerConn {
 			rdhd : INVALID_EVENT_HANDLE,
 			wrhd : INVALID_EVENT_HANDLE,
 		};
+
+		unsafe {
+			retv.rdbuf.set_len(RDBUF_SIZE);
+		}
 
 		retv._read_sock_inner()?;
 		retv._write_sock_inner()?;
@@ -719,6 +777,10 @@ impl EvtChatServerConn {
 		self.wrhd = INVALID_EVENT_HANDLE;
 		self.rdhd = INVALID_EVENT_HANDLE;
 		self.rdbuf = Vec::with_capacity(RDBUF_SIZE);
+		unsafe {
+			self.rdbuf.set_len(RDBUF_SIZE);
+		}
+
 		self.rdsidx = 0;
 		self.rdeidx = 0;
 		self.rdlen = 0;
@@ -784,6 +846,7 @@ impl EvtChatServer {
 			loop {
 				let nsock :TcpSockHandle = self.sock.accept_socket()?;
 				let nconn :EvtChatServerConn = EvtChatServerConn::new(nsock,self as *mut EvtChatServer,self.evmain)?;
+				debug_trace!("get {} => {} connect", nconn.sock.get_peer_format(),nconn.sock.get_self_format());
 				self.accsocks.push(nconn);
 				if self.sock.is_accept_mode() {
 					break;
@@ -838,6 +901,8 @@ impl EvtChatServer {
 			}
 			retv.inacc = 1;
 		}
+
+		debug_trace!("listen on {}",retv.sock.get_self_format());
 
 		unsafe {
 			let _ = &(*retv.evmain).add_event(Arc::new(&mut retv as  *mut dyn EvtCall),retv.exithd,READ_EVENT)?;

@@ -139,6 +139,7 @@ impl EvtMain {
 	pub fn add_timer(&mut self,bv :Arc<*mut dyn EvtTimer>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
 		self.guid += 1;
 		let ntimer :EvtTimerWindows = EvtTimerWindows::new(bv,interval,conti)?;
+		evtcall_log_trace!("insert timer 0x{:x}",self.guid);
 		self.timermaps.insert(self.guid,ntimer);
 		Ok(self.guid)
 	}
@@ -163,10 +164,11 @@ impl EvtMain {
 			Some(_ev) => {
 			},
 			None => {
-				evtcall_log_error!("not get timer {} timer",guid);
+				evtcall_log_error!("not get timer 0x{:x} timer",guid);
 				return removed;
 			}
 		}
+		evtcall_log_trace!("remove timer 0x{:x}",guid);
 		self.timermaps.remove(&guid);
 		removed = 1;
 		return removed;
@@ -244,6 +246,7 @@ impl EvtMain {
 					dret = WaitForMultipleObjectsEx(handles.len() as DWORD,handles.as_ptr(),FALSE,timeout,FALSE);
 				}				
 			} else {
+				evtcall_log_trace!("timer set");
 				assert!(self.timerevt.len() > 0);
 				unsafe {
 					dret = WaitForMultipleObjectsEx(self.timerevt.len() as DWORD, self.timerevt.as_ptr(),FALSE,timeout,FALSE);
@@ -350,6 +353,7 @@ impl EvtMain {
 
 		for g in guids.iter() {
 			let  mut findtv :Option<EvtTimerWindows> = None;
+			evtcall_log_trace!("will remove 0x{:x} timer",*g);
 			match self.timermaps.get(g) {
 				Some(cv) => {
 					findtv = Some(cv.clone());

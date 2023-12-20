@@ -622,6 +622,14 @@ impl TcpSockHandle {
 		}
 		return retv;
 	}
+
+	pub fn get_self_format(&self) -> String {
+		return format!("{}:{}",self.localaddr,self.localport);
+	}
+
+	pub fn get_peer_format(&self) -> String {
+		return format!("{}:{}",self.peeraddr,self.peerport);
+	}
 }
 
 pub fn init_socket() -> Result<(),Box<dyn Error>> {

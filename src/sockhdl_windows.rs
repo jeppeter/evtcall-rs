@@ -755,6 +755,7 @@ impl TcpSockHandle {
 
 		retv._get_connect_func(&guid)?;
 		let completed = retv._call_connect_func(ipaddr,port)?;
+		evtcall_log_trace!("_call_connect_func completed {}",completed);
 		if completed == 0 {
 			retv.inconn = 1;
 		} else {
@@ -892,7 +893,7 @@ impl TcpSockHandle {
 		let bret :BOOL;
 		let mut dret : DWORD = 0;
 		let reti :i32;
-		if self.inacc > 0 {
+		if self.inconn > 0 {
 			unsafe {
 				let _hd = self.sock as HANDLE;
 				let _ovptr = &mut self.connov;
@@ -908,7 +909,7 @@ impl TcpSockHandle {
 			self._inner_make_read_write()?;
 		}
 
-		if self.inacc > 0 {
+		if self.inconn > 0 {
 			completed = 0;
 		}
 		Ok(completed)
@@ -987,6 +988,7 @@ impl TcpSockHandle {
 
 	pub fn read(&mut self,rbuf :*mut u8, rlen :u32) -> Result<i32,Box<dyn Error>> {
 		if self.inacc > 0 || self.inconn >0 || self.inrd > 0 {
+			evtcall_log_error!("not valid state inacc {} inconn {} inrd {}",self.inacc,self.inconn,self.inrd);
 			evtcall_new_error!{SockHandleError,"not valid state"}
 		}
 
@@ -1068,6 +1070,16 @@ impl TcpSockHandle {
 		}
 		return retv;
 	}
+
+	pub fn get_self_format(&self) -> String {
+		return format!("{}:{}",self.localaddr,self.localport);
+	}
+
+	pub fn get_peer_format(&self) -> String {
+		return format!("{}:{}",self.peeraddr,self.peerport);
+	}
+
+
 }
 
 pub fn init_socket() -> Result<(),Box<dyn Error>> {
