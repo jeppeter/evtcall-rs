@@ -124,6 +124,8 @@ struct EvtChatClient {
 	stdinrdlen :usize,
 	insertstdinrd : i32,
 
+	exithd : u64,
+	inexit : i32,
 
 	evmain:*mut EvtMain,
 }
@@ -135,7 +137,7 @@ impl Drop for EvtChatClient {
 }
 
 impl EvtCall for EvtChatClient {
-	fn handle(&mut self,evthd :u64, _evttype :u32,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+	fn handle(&mut self,evthd :u64, _evttype :u32,evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
 		if evthd == self.sock.get_connect_handle() {
 			self.connect_handle()?;
 		} else if evthd == self.sock.get_write_handle() {
@@ -144,6 +146,8 @@ impl EvtCall for EvtChatClient {
 			self.sock_read_proc()?;
 		} else if evthd == self.stdinrd.get_handle() {
 			self.stdin_read_proc()?;
+		} else if evthd == self.exithd {
+			return evtmain.break_up();
 		} else {
 			extargs_new_error!{EvtChatError,"not recognize evthd 0x{:x}",evthd}
 		}
@@ -200,6 +204,13 @@ impl EvtChatClient {
 				let _ = &(*self.evmain).remove_event(self.stdinrdhd);
 			}
 			self.insertstdinrd = 0;
+		}
+
+		if self.inexit > 0 {
+			unsafe {
+				let _ = &(*self.evmain).remove_event(self.exithd);
+			}
+			self.inexit = 0;
 		}
 
 		self.check_clear_evmain();
@@ -398,7 +409,7 @@ impl EvtChatClient {
 		return self._conti_write_sock();
 	}
 
-	pub fn connect_client(ipaddr :&str, port :u32,timemills :i32, evtmain :&mut EvtMain) -> Result<Self,Box<dyn Error>> {
+	pub fn connect_client(ipaddr :&str, port :u32,timemills :i32,exithd :u64, evtmain :&mut EvtMain) -> Result<Self,Box<dyn Error>> {
 		let mut retv :Self = Self {
 			sock : TcpSockHandle::connect_client(ipaddr,port,"",0,false)?,
 			rdvecs : Vec::with_capacity(RDBUF_SIZE),
@@ -423,6 +434,10 @@ impl EvtChatClient {
 			stdinrdlen : 0,
 			insertstdinrd : 0,
 			stdinrdhd : INVALID_EVENT_HANDLE,
+
+			exithd : exithd,
+			inexit : 0,
+
 			evmain : (evtmain as *mut EvtMain),
 		};
 
@@ -436,6 +451,10 @@ impl EvtChatClient {
 			retv.sock_read_proc()?;
 			retv.stdin_read_proc()?;
 		}
+
+		evtmain.add_event(Arc::new(&mut retv),retv.exithd,READ_EVENT)?;
+		retv.inexit = 1;
+
 		Ok(retv)
 	}
 
@@ -511,6 +530,8 @@ struct EvtChatServer {
 	accsocks :Vec<EvtChatServerConn>,
 	inacc : i32,
 	acchd :u64,	
+	exithd :u64,
+	inexit : i32,
 }
 
 impl Drop for EvtChatServerConn {
@@ -797,13 +818,15 @@ impl EvtChatServer {
 		Ok(())
 	}
 
-	pub fn bind_server(ipaddr :&str, port :u32,backlog :i32, evtmain :*mut EvtMain) -> Result<Self,Box<dyn Error>> {
+	pub fn bind_server(ipaddr :&str, port :u32,backlog :i32,exithd :u64, evtmain :*mut EvtMain) -> Result<Self,Box<dyn Error>> {
 		let mut retv :Self = Self {
 			sock : TcpSockHandle::bind_server(ipaddr,port,backlog)?,
 			evmain : evtmain,
 			accsocks : Vec::new(),
 			inacc : 0,
 			acchd : INVALID_EVENT_HANDLE,
+			exithd : exithd,
+			inexit : 0,
 		};
 		if !retv.sock.is_accept_mode() {
 			retv._inner_accept()?;
@@ -814,6 +837,11 @@ impl EvtChatServer {
 			}
 			retv.inacc = 1;
 		}
+
+		unsafe {
+			let _ = &(*retv.evmain).add_event(Arc::new(&mut retv as  *mut dyn EvtCall),retv.exithd,READ_EVENT)?;
+		}
+		retv.inexit = 1;
 		assert!(retv.inacc > 0);
 		Ok(retv)
 	}
@@ -825,7 +853,21 @@ impl EvtChatServer {
 				break;
 			}
 			self.accsocks[0].close();
+			let csize = self.accsocks.len();
+			if csize == nsize {
+				/*it not remove ,so do remove*/
+				self.accsocks.remove(0);
+			}
 		}
+
+		if self.inexit > 0 {
+			assert!(self.evmain != std::ptr::null_mut::<EvtMain>());
+			unsafe {
+				let _ = &(*self.evmain).remove_event(self.exithd);
+			}
+			self.inexit = 0;
+		}
+
 		if self.inacc > 0 {
 			assert!(self.evmain != std::ptr::null_mut::<EvtMain>());
 			unsafe {
@@ -844,13 +886,15 @@ impl EvtChatServer {
 	}
 }
 
-#[allow(unused_variables)]
 impl EvtCall for EvtChatServer {
-	fn handle(&mut self,evthd :u64, evttype :u32,evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+	fn handle(&mut self,evthd :u64, _evttype :u32,evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+		if evthd == self.exithd {
+			return evtmain.break_up();
+		}
 		return self.accept_proc();
 	}
 
-	fn close_event(&mut self,evthd :u64, evttype :u32, evtmain :&mut EvtMain)  {
+	fn close_event(&mut self,_evthd :u64, _evttype :u32, _evtmain :&mut EvtMain)  {
 		self.close_event_inner();
 	}
 }

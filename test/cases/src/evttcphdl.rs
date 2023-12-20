@@ -34,6 +34,8 @@ use evtcall::mainloop::EvtMain;
 use evtcall::sockhdl::TcpSockHandle;
 use std::io::{Write};
 
+use super::exithdl::*;
+
 extargs_error_class!{EvtChatError}
 
 #[cfg(target_os = "windows")]
@@ -49,6 +51,7 @@ fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	let mut ipaddr :String = format!("{}",DEFAULT_EVCHAT_IPADDR);
 	let mut port :u32 = DEFAULT_EVCHAT_PORT;
 	let mut evcli :EvtChatClient;
+	let exithd :u64;
 	let sarr :Vec<String>;
 	init_log(ns.clone())?;
 	sarr = ns.get_array("subnargs");
@@ -59,10 +62,13 @@ fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 		ipaddr = format!("{}",sarr[1]);
 	}
 
-	evcli = EvtChatClient::connect_client(&ipaddr,port,5000,&mut evtmain)?;
+	exithd = init_exit_handle()?;
+
+	evcli = EvtChatClient::connect_client(&ipaddr,port,5000,exithd,&mut evtmain)?;
 	let _ = evtmain.main_loop()?;
 	evcli.close();
 	evtmain.close();
+	fini_exit_handle();
 	Ok(())
 }
 
@@ -73,6 +79,7 @@ fn evchatsvr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	let mut port :u32 = DEFAULT_EVCHAT_PORT;
 	let mut evsvr :EvtChatServer;
 	let sarr :Vec<String>;
+	let exithd :u64;
 	init_log(ns.clone())?;
 	sarr = ns.get_array("subnargs");
 	if sarr.len() > 0 {
@@ -82,10 +89,12 @@ fn evchatsvr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 		ipaddr = format!("{}",sarr[1]);
 	}
 
-	evsvr = EvtChatServer::bind_server(&ipaddr,port,5,&mut evtmain)?;
-	let _ = evtmain.main_loop()?;
+	exithd = init_exit_handle()?;
+	evsvr = EvtChatServer::bind_server(&ipaddr,port,5,exithd,&mut evtmain)?;
+	let _ = evtmain.main_loop()?;	
 	evsvr.close();
 	evtmain.close();
+	fini_exit_handle();
 	Ok(())
 }
 

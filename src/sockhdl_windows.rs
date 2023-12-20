@@ -395,7 +395,7 @@ impl TcpSockHandle {
 		retv.localaddr = format!("{}",ipaddr);
 		retv.localport = port;
 		unsafe {
-			retv.sock = socket(AF_INET,winapi::shared::ws2def::SOCK_STREAM,0);
+			retv.sock = socket(AF_INET,SOCK_STREAM,0);
 		}
 
 		if retv.sock == INVALID_SOCKET {

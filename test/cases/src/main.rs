@@ -35,6 +35,7 @@ mod loglib_windows;
 mod loglib;
 mod strop;
 mod fileop;
+mod exithdl;
 mod evttcphdl;
 
 
