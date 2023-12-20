@@ -135,7 +135,7 @@ macro_rules! close_handle_safe {
 			}
 			if _bret == FALSE {
 				_errval = get_errno!();
-				evtcall_log_error!("CloseHandle {} error {}",$name,_errval);
+				evtcall_log_warn!("CloseHandle {} error {}",$name,_errval);
 			}
 		}
 		$hdval = NULL_HANDLE_VALUE;
@@ -154,7 +154,7 @@ macro_rules! close_socket_safe {
 
 			if _iret == SOCKET_ERROR {
 				_errval = get_errno!();
-				evtcall_log_error!("close {} error {}",$name,_errval);
+				evtcall_log_warn!("close 0x{:x} {} error {}",$sockval,$name,_errval);
 			}
 		}
 		$sockval = INVALID_SOCKET;
@@ -193,7 +193,7 @@ macro_rules! cancel_io_safe {
 				unsafe {
 					_errval = GetLastError();
 				}
-				evtcall_log_error!("CancelIoEx {} error {}",$name,_errval);
+				evtcall_log_warn!("CancelIoEx {} error {}",$name,_errval);
 			}
 		}
 		$val = 0;
@@ -354,6 +354,7 @@ impl TcpSockHandle {
 			ret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"socket accsock error {}",ret}
 		}
+		evtcall_log_trace!("accsock 0x{:x}",self.accsock);
 		self.ooaccrd = 0;
 		self.inacc = 0;
 		self.accrdbuf = Vec::with_capacity(1024);
@@ -402,6 +403,7 @@ impl TcpSockHandle {
 			ret = get_errno!();
 			evtcall_new_error!{SockHandleError,"cannot socket error {}",ret}
 		}
+		evtcall_log_trace!("sock 0x{:x}",retv.sock);
 
 		opt = 1;
 		unsafe {
@@ -429,7 +431,7 @@ impl TcpSockHandle {
 
 		retv._bind_addr(ipaddr,port)?;
 
-		create_event_safe!(retv.connov.hEvent,"connov handle");
+		create_event_safe!(retv.accov.hEvent,"connov handle");
 
 		unsafe {
 			iret = listen(retv.sock,backlog);

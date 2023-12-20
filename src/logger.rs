@@ -74,7 +74,7 @@ fn evtcall_proc_log_init(prefix :&str) -> LogVar {
 
 lazy_static! {
 	static ref EVTCALL_OPTIONS_LOG_LEVEL : LogVar = {
-		evtcall_proc_log_init("evtcall")
+		evtcall_proc_log_init("EVTCALL")
 	};
 }
 

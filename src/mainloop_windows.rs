@@ -1,6 +1,7 @@
 
 
 use crate::interface::*;
+use crate::consts::*;
 use std::sync::Arc;
 use std::error::Error;
 use std::collections::HashMap;
@@ -15,7 +16,7 @@ use winapi::um::minwinbase::{LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES};
 use winapi::um::winbase::{WAIT_OBJECT_0};
 use winapi::um::synchapi::{CreateEventW};
 use winapi::um::handleapi::{CloseHandle};
-use crate::{evtcall_error_class,evtcall_new_error,evtcall_log_error};
+use crate::{evtcall_error_class,evtcall_new_error,evtcall_log_error,evtcall_log_trace};
 use crate::consts_windows::*;
 use crate::logger::*;
 
@@ -143,7 +144,13 @@ impl EvtMain {
 	}
 
 	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>,evthd :u64,evttype :u32) -> Result<(),Box<dyn Error>> {
+
+		if evthd == 0 || evthd == INVALID_EVENT_HANDLE {
+			evtcall_new_error!{MainLoopWindowsError,"not valid evthd 0x{:x}",evthd}
+		}
+
 		self.guid += 1;
+		evtcall_log_trace!("add evthd 0x{:x} evttype 0x{:x}",evthd,evttype);
 		let nevt :EvtCallWindows = EvtCallWindows::new(bv,evthd,evttype)?;
 		self.evtmaps.insert(self.guid,nevt);
 		self.guidevtmaps.insert(evthd,self.guid);
@@ -181,13 +188,14 @@ impl EvtMain {
 		self.guidevtmaps.remove(&evthd);
 		self.evtmaps.remove(&curguid);
 		removed = 1;
+		evtcall_log_trace!("remove evthd 0x{:x}",evthd);
 		return removed;
 	}
 
 	fn get_handles(&self) -> (Vec<HANDLE>,Vec<u64>) {
 		let mut rethdls :Vec<HANDLE> = Vec::new();
 		let mut retguids :Vec<u64> = Vec::new();
-		for (g,v) in self.guidevtmaps.iter() {
+		for (v,g) in self.guidevtmaps.iter() {
 			rethdls.push(*v as HANDLE);
 			retguids.push(*g);
 		}
@@ -229,6 +237,9 @@ impl EvtMain {
 			let dret :DWORD;
 
 			if handles.len() > 0 {
+				for h in handles.iter() {
+					evtcall_log_trace!("h 0x{:x}",*h as u64);
+				}
 				unsafe {
 					dret = WaitForMultipleObjectsEx(handles.len() as DWORD,handles.as_ptr(),FALSE,timeout,FALSE);
 				}				
@@ -240,9 +251,10 @@ impl EvtMain {
 			}
 
 			let timeguids = self.get_time_guids();
-
+			evtcall_log_trace!("dret 0x{:x}",dret);
 			if dret >= WAIT_OBJECT_0 && dret < ( WAIT_OBJECT_0 + (handles.len() as DWORD)) {
 				if guids.len() > (dret - WAIT_OBJECT_0) as usize {
+
 					let curguid = guids[(dret as usize) - (WAIT_OBJECT_0 as usize)];
 					let mut findev :Option<EvtCallWindows> = None;
 					match self.evtmaps.get(&curguid) {

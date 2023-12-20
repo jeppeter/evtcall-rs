@@ -832,6 +832,7 @@ impl EvtChatServer {
 			retv._inner_accept()?;
 		} else {
 			retv.acchd = retv.sock.get_accept_handle();
+			debug_trace!("add accept 0x{:x}",retv.acchd);
 			unsafe {
 				(*retv.evmain).add_event(Arc::new(&mut retv as *mut EvtChatServer as *mut dyn EvtCall),retv.acchd,READ_EVENT)?;
 			}

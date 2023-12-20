@@ -1,7 +1,7 @@
 
 use evtcall::consts::*;
 use extargsparse_worker::{extargs_error_class,extargs_new_error};
-use super::{format_str_log,debug_error};
+use super::{format_str_log,debug_error,debug_trace};
 use super::loglib::{log_get_timestamp,log_output_function};
 
 use winapi::shared::minwindef::{TRUE,FALSE,BOOL};
@@ -19,7 +19,6 @@ use std::error::Error;
 extargs_error_class!{ExitHandleError}
 
 static mut HANDLE_EXIT :u64 = INVALID_EVENT_HANDLE;
-
 
 macro_rules! get_errno {
 	() => {{
@@ -52,11 +51,13 @@ macro_rules! create_event_safe {
 }
 
 unsafe extern "system" fn ctrl_c_handler(ty: u32) -> BOOL {
+	debug_trace!("ty 0x{:x}",ty);
 	if ty == CTRL_C_EVENT {
 		if HANDLE_EXIT != INVALID_EVENT_HANDLE {
 			unsafe {
 				SetEvent(HANDLE_EXIT as HANDLE);
 			}
+			debug_trace!("set HANDLE_EXIT");
 		}
 	}
 	return TRUE;
@@ -76,6 +77,7 @@ pub fn init_exit_handle() -> Result<u64,Box<dyn Error>> {
 			unsafe{HANDLE_EXIT = INVALID_EVENT_HANDLE};
 			extargs_new_error!{ExitHandleError,"not insert ctrl_c_handler error {}",reti}
 		}
+		debug_trace!("HANDLE_EXIT 0x{:x}",unsafe{HANDLE_EXIT});
 	}
 	return Ok(unsafe {HANDLE_EXIT});
 }
