@@ -358,7 +358,10 @@ impl TcpSockHandle {
 		evtcall_log_trace!("accsock 0x{:x}",self.accsock);
 		self.ooaccrd = 0;
 		self.inacc = 0;
-		self.accrdbuf = Vec::with_capacity(1024);
+		self.accrdbuf = Vec::new();
+		for _ in 0..1024 {
+			self.accrdbuf.push(0);
+		}
 		assert!(self.acceptfunc.is_some());
 
 		unsafe {
@@ -542,10 +545,11 @@ impl TcpSockHandle {
 			evtcall_new_error!{SockHandleError,"sock not AF_INET {}",name.sin_family}
 		}
 
-		let mut svec :Vec<u8> = Vec::with_capacity(INET_ADDRSTRLEN);
-		for c in svec.iter_mut() {
-			*c = 0;
+		let mut svec :Vec<u8> = Vec::new();
+		for _ in 0..INET_ADDRSTRLEN {
+			svec.push(0);
 		}
+
 		unsafe {
 			let _nptr = (&name.sin_addr as *const IN_ADDR) as * const c_void;
 			let _ipptr = svec.as_ptr() as *mut u8 as PSTR;
@@ -715,9 +719,9 @@ impl TcpSockHandle {
 			evtcall_new_error!{SockHandleError,"sock not AF_INET {}",name.sin_family}
 		}
 
-		let mut svec :Vec<u8> = Vec::with_capacity(INET_ADDRSTRLEN);
-		for c in svec.iter_mut() {
-			*c = 0;
+		let mut svec :Vec<u8> = Vec::new();
+		for _ in 0..INET_ADDRSTRLEN {
+			svec.push(0);
 		}
 		unsafe {
 			let _nptr = (&name.sin_addr as *const IN_ADDR) as * const c_void;
