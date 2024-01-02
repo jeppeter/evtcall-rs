@@ -259,6 +259,7 @@ impl EvtMain {
 				if guids.len() > (dret - WAIT_OBJECT_0) as usize {
 
 					let curguid = guids[(dret as usize) - (WAIT_OBJECT_0 as usize)];
+					evtcall_log_trace!("hdl 0x{:x}",handles[(dret as usize) - (WAIT_OBJECT_0 as usize)] as u64);
 					let mut findev :Option<EvtCallWindows> = None;
 					match self.evtmaps.get(&curguid) {
 						Some(ev) => {

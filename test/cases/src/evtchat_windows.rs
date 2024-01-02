@@ -492,7 +492,7 @@ impl EvtChatClient {
 			retv.insertconn = 1;
 			retv.connguid = evtmain.add_timer(Arc::new(&mut retv),timemills,false)?;
 			retv.insertconntimeout = 1;
-			debug_trace!("connguid 0x{:x} connhd 0x{:x}",retv.connguid,retv.connhd);
+			debug_trace!("connguid 0x{:x} connhd 0x{:x} timemills {}",retv.connguid,retv.connhd,timemills);
 		} else {
 			debug_trace!("will read mode");
 			retv.sock_read_proc()?;
@@ -733,7 +733,7 @@ impl EvtChatServerConn {
 			}			
 			self.inrd = 0;
 		}
-
+		debug_trace!(" ");
 		self._read_sock_inner()?;
 		Ok(())
 	}

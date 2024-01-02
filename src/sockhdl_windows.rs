@@ -1,6 +1,6 @@
 
 use winapi::um::winnt::{HANDLE,PVOID,LPCWSTR,PSTR};
-use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen,WSA_IO_PENDING,getpeername,ntohs,getsockname,MSG_PARTIAL,WSARecv,WSASend};
+use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,getsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen,WSA_IO_PENDING,getpeername,ntohs,getsockname,MSG_PARTIAL,WSARecv,WSASend};
 use winapi::um::mswsock::{LPFN_ACCEPTEX,WSAID_ACCEPTEX,SO_UPDATE_ACCEPT_CONTEXT,LPFN_CONNECTEX,WSAID_CONNECTEX};
 
 use winapi::shared::ws2def::*;
@@ -15,7 +15,7 @@ use winapi::um::winbase::{INFINITE,WAIT_OBJECT_0};
 use winapi::um::handleapi::{CloseHandle};
 use winapi::shared::minwindef::{MAKEWORD,WORD,LOBYTE,HIBYTE,BOOL,DWORD,TRUE,FALSE,LPVOID,LPDWORD};
 use winapi::ctypes::{c_int,c_char,c_void};
-use winapi::shared::winerror::{ERROR_IO_INCOMPLETE,ERROR_IO_PENDING};
+use winapi::shared::winerror::{ERROR_IO_INCOMPLETE,ERROR_IO_PENDING,ERROR_NOT_FOUND};
 
 use super::{evtcall_error_class,evtcall_new_error};
 use super::consts_windows::{NULL_HANDLE_VALUE};
@@ -189,11 +189,14 @@ macro_rules! cancel_io_safe {
 			unsafe {
 				_bret = CancelIoEx($hdval as HANDLE,&mut $ovval);
 			}
-			if _bret == 0 {
+			if _bret == FALSE {
 				unsafe {
 					_errval = GetLastError();
 				}
-				evtcall_log_warn!("CancelIoEx {} error {}",$name,_errval);
+				if _errval != ERROR_NOT_FOUND {
+					evtcall_log_warn!("CancelIoEx {} error {}",$name,_errval);	
+				}
+				
 			}
 		}
 		$val = 0;
@@ -240,9 +243,6 @@ impl TcpSockHandle {
 		self.wrlen = 0;
 
 		self.iscloseerr = false;
-
-
-
 		return;
 	}
 
@@ -504,6 +504,7 @@ impl TcpSockHandle {
 
 			if bret == FALSE {
 				ret = get_errno_direct!();
+				evtcall_log_trace!("ret {}",ret);
 				if ret == ERROR_IO_INCOMPLETE || ret == ERROR_IO_PENDING {
 					/*not completed*/
 					return Ok(0);
@@ -649,8 +650,21 @@ impl TcpSockHandle {
 		let wsaerr :c_int;
 		let mut completed :i32 = 1;
 		let bret :BOOL;
+		let mut errval :c_int = 0;
+		let iret :c_int;
 
 		name = self._format_sockaddr_in(ipaddr,port);
+
+		unsafe {
+			let _eptr  = (&mut errval as *mut c_int) as *mut i8;
+			let _elen = std::mem::size_of::<c_int>() as i32;
+			iret = setsockopt(self.sock,SOL_SOCKET,SO_ERROR,_eptr,_elen);			
+		}
+
+		if iret != 0 {
+			evtcall_new_error!{SockHandleError,"cannot set setsockopt error 0 {}",iret}
+		}
+
 
 		unsafe {
 			let _namelen = std::mem::size_of::<SOCKADDR_IN>() as i32;
@@ -663,11 +677,13 @@ impl TcpSockHandle {
 
 		if bret == FALSE {
 			wsaerr = get_wsa_errno_direct!();
+			evtcall_log_trace!("wsaerr {}",wsaerr);
 			if wsaerr != (ERROR_IO_PENDING as i32){
 				evtcall_new_error!{SockHandleError,"connexfunc call error {}",wsaerr}
 			} 
 			completed = 0;
 		}
+		evtcall_log_trace!("completed {}",completed);
 		Ok(completed)
 	}
 
@@ -733,6 +749,8 @@ impl TcpSockHandle {
 			retv.sock = socket(AF_INET,SOCK_STREAM,0);
 		}
 
+		evtcall_log_trace!(" ");
+
 		if retv.sock == INVALID_SOCKET {
 			iret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"socket client error {}",iret}
@@ -744,6 +762,8 @@ impl TcpSockHandle {
 			iret = ioctlsocket(retv.sock,FIONBIO,_bptr);
 		}
 
+		evtcall_log_trace!(" ");
+
 		if iret == SOCKET_ERROR {
 			iret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"ioctlsocket FIONBIO error {}",iret}
@@ -751,7 +771,11 @@ impl TcpSockHandle {
 
 		retv._bind_addr(localip,localport)?;
 
+		evtcall_log_trace!(" ");
+
 		create_event_safe!(retv.connov.hEvent,"connov event");
+
+		evtcall_log_trace!(" ");
 
 		retv._get_connect_func(&guid)?;
 		let completed = retv._call_connect_func(ipaddr,port)?;
@@ -763,6 +787,9 @@ impl TcpSockHandle {
 			retv._get_self_name()?;
 			retv._inner_make_read_write()?;
 		}
+
+		evtcall_log_trace!(" ");
+
 		if retv.inconn > 0 && connected {
 			loop {
 				unsafe {
@@ -821,7 +848,9 @@ impl TcpSockHandle {
 				iret = WSARecv(self.sock,_rdptr,1,_dretptr,_flagptr,_ovptr,_funcptr);
 			}
 
+			evtcall_log_trace!("WSARecv {}",iret);
 			if iret == 0 {
+				evtcall_log_trace!("dret {}",dret);
 				if dret == 0 {
 					self.iscloseerr = true;
 					evtcall_new_error!{SockHandleError,"closed local[{}:{}] peer[{}:{}]",self.localaddr,self.localport,self.peeraddr,self.peerport}
@@ -892,17 +921,34 @@ impl TcpSockHandle {
 		let mut completed :i32=1;
 		let bret :BOOL;
 		let mut dret : DWORD = 0;
-		let reti :i32;
+		let retu :u32;
+		let wsaerru :c_int;
+		let mut errval :c_int = 0;
 		if self.inconn > 0 {
 			unsafe {
 				let _hd = self.sock as HANDLE;
 				let _ovptr = &mut self.connov;
 				let _dretptr = &mut dret;
+				SetLastError(0);
 				bret = GetOverlappedResult(_hd,_ovptr,_dretptr,FALSE);
 			}
 			if bret == FALSE {
-				reti = get_errno!();
-				evtcall_new_error!{SockHandleError,"get connov result error {}",reti}
+				retu = get_errno_direct!();
+				wsaerru = get_wsa_errno_direct!();
+				evtcall_log_trace!("retu {} wsaerru {}",retu,wsaerru);
+
+				unsafe {
+					let _eptr = (&mut errval as *mut c_int) as *mut i8;
+					let mut _elen :i32 = std::mem::size_of::<c_int>() as i32;
+					getsockopt(self.sock,SOL_SOCKET,SO_ERROR,_eptr,&mut _elen);
+				}
+
+				evtcall_log_trace!("errval {}",errval);
+
+				if retu == ERROR_IO_PENDING {
+					return Ok(0);
+				}
+				evtcall_new_error!{SockHandleError,"get connov result error {}",retu}
 			}
 			self.inconn = 0;
 			self._get_self_name()?;
