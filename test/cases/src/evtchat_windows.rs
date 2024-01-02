@@ -842,13 +842,16 @@ impl EvtChatServer {
 	}
 
 	fn _inner_accept(&mut self) -> Result<(),Box<dyn Error>> {
+		debug_trace!(" ");
 		if self.inacc == 0 {
 			loop {
+				debug_trace!(" ");
 				let nsock :TcpSockHandle = self.sock.accept_socket()?;
 				let nconn :EvtChatServerConn = EvtChatServerConn::new(nsock,self as *mut EvtChatServer,self.evmain)?;
 				debug_trace!("get {} => {} connect", nconn.sock.get_peer_format(),nconn.sock.get_self_format());
 				self.accsocks.push(nconn);
 				if self.sock.is_accept_mode() {
+					debug_trace!(" ");
 					break;
 				}
 				/*we have some thing to read*/
@@ -858,18 +861,23 @@ impl EvtChatServer {
 				}
 			}
 			self.acchd = self.sock.get_accept_handle();
-			unsafe {
-				let _ = &(*self.evmain).add_event(Arc::new(self as *mut dyn EvtCall),self.acchd,READ_EVENT)?;
+			if self.acchd != INVALID_EVENT_HANDLE && self.acchd != 0 {
+				debug_trace!(" will accept");
+				unsafe {
+					let _ = &(*self.evmain).add_event(Arc::new(self as *mut dyn EvtCall),self.acchd,READ_EVENT)?;
+				}
+				self.inacc = 1;				
 			}
-			self.inacc = 1;
 		}
 		Ok(())
 	}
 
 	fn accept_proc(&mut self) -> Result<(),Box<dyn Error>> {
 		if self.inacc > 0 {
+			debug_trace!(" ");
 			let completed = self.sock.complete_accept()?;
 			if completed == 0 {
+				debug_trace!(" ");
 				return Ok(());
 			}
 			unsafe {
@@ -877,6 +885,7 @@ impl EvtChatServer {
 			}
 			self.inacc = 0;
 		}
+		debug_trace!(" ");
 		self._inner_accept()?;
 		Ok(())
 	}

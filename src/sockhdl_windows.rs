@@ -336,6 +336,7 @@ impl TcpSockHandle {
 			iret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"cannot get WSAIoctl error {}",iret}
 		}
+		evtcall_log_trace!("acceptfunc {:p}",self.acceptfunc.as_ref().unwrap());
 		Ok(())
 	}
 
@@ -576,6 +577,7 @@ impl TcpSockHandle {
 		let mut retv :Self = Self::_default_new(TcpSockType::SockServerConnType);
 		let sret :c_int;
 		let sv :u32;
+		evtcall_log_trace!(" ");
 		match self.mtype {
 			TcpSockType::SockServerType => {
 
@@ -590,16 +592,22 @@ impl TcpSockHandle {
 		}
 		retv.localaddr = format!("{}",self.localaddr);
 		retv.localport = self.localport;
+		evtcall_log_trace!(" ");
 
 		/*to make */
 		retv.sock = self.accsock;
 		self.accsock = INVALID_SOCKET;
 
+		evtcall_log_trace!(" ");
+
 		unsafe {
 			let _sptr = ((&retv.sock) as *const SOCKET) as *const c_char;
 			let _slen = std::mem::size_of::<SOCKET>() as i32;
+			evtcall_log_trace!("_sptr {:p} _slen {}",_sptr,_slen);
 			sret = setsockopt(retv.sock,SOL_SOCKET,SO_UPDATE_ACCEPT_CONTEXT,_sptr,_slen);
 		}
+
+		evtcall_log_trace!(" ");
 
 		if sret != 0 {
 			sv = get_errno_direct!();
