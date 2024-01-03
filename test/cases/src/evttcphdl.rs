@@ -44,6 +44,7 @@ include!("evtchat_windows.rs");
 
 
 const  DEFAULT_EVCHAT_IPADDR :&str = "127.0.0.1";
+const  DEFAULT_EVCHAT_LISTEN_ADDR :&str = "0.0.0.0";
 const DEFAULT_EVCHAT_PORT :u32 = 4012;
 
 fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {
@@ -82,7 +83,7 @@ fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 #[allow(unused_variables)]
 fn evchatsvr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {
 	let mut evtmain :EvtMain = EvtMain::new(0)?;
-	let mut ipaddr :String = format!("{}",DEFAULT_EVCHAT_IPADDR);
+	let mut ipaddr :String = format!("{}",DEFAULT_EVCHAT_LISTEN_ADDR);
 	let mut port :u32 = DEFAULT_EVCHAT_PORT;
 	let mut evsvr :EvtChatServer;
 	let sarr :Vec<String>;

@@ -307,6 +307,7 @@ impl TcpSockHandle {
 		name = self._format_sockaddr_in(ipaddr,port);
 		
 		namelen = std::mem::size_of::<SOCKADDR_IN>() as c_int;
+		evtcall_debug_buffer_trace!(&name as *const SOCKADDR_IN,namelen,"name set");
 		unsafe {
 			let _pv :*const SOCKADDR = (&name as *const SOCKADDR_IN) as *const SOCKADDR;
 			iret = bind(self.sock,_pv, namelen);
@@ -316,6 +317,7 @@ impl TcpSockHandle {
 			ret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"bind [{}:{}] error {}",ipaddr,port,ret}
 		}
+
 		Ok(())
 	}
 
@@ -337,7 +339,38 @@ impl TcpSockHandle {
 			iret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"cannot get WSAIoctl error {}",iret}
 		}
-		evtcall_log_trace!("acceptfunc {:p}",self.acceptfunc.as_ref().unwrap());
+		evtcall_debug_buffer_trace!((guid as *const GUID)as *const u8,std::mem::size_of::<GUID>(),"acceptfunc get value {:p}",self.acceptfunc.as_ref().unwrap());
+		#[cfg(target_pointer_width  = "64")]
+		{
+			let np :*const u64 = unsafe { std::mem::transmute(self.acceptfunc.as_ref().unwrap()) };
+			let cp :u64 = unsafe{*np};
+			let fs :unsafe extern "system" fn(
+				dwError: DWORD,
+				cbTransferred: DWORD,
+				lpOverlapped: LPWSAOVERLAPPED,
+				dwFlags: DWORD,
+				) -> () = unsafe {std::mem::transmute(cp)};
+			let ps :*const u8 = unsafe {std::mem::transmute(fs)};
+			evtcall_log_trace!("ps {:p}",ps);
+			evtcall_debug_buffer_trace!(ps ,0x20,"accept func dump");			
+		}
+
+		#[cfg(target_pointer_width  = "32")]
+		{
+			let np :*const u32 = unsafe { std::mem::transmute(self.acceptfunc.as_ref().unwrap()) };
+			let cp :u32 = unsafe{*np};
+			let fs :unsafe extern "system" fn(
+				dwError: DWORD,
+				cbTransferred: DWORD,
+				lpOverlapped: LPWSAOVERLAPPED,
+				dwFlags: DWORD,
+				) -> () = unsafe {std::mem::transmute(cp)};
+			let ps :*const u8 = unsafe {std::mem::transmute(fs)};
+			evtcall_log_trace!("ps {:p}",ps);
+			evtcall_debug_buffer_trace!(ps ,0x20,"accept func dump");			
+		}
+
+		//evtcall_log_trace!("acceptfunc {:p}",self.acceptfunc.as_ref().unwrap());
 		Ok(())
 	}
 
@@ -356,7 +389,7 @@ impl TcpSockHandle {
 			ret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"socket accsock error {}",ret}
 		}
-		evtcall_log_trace!("accsock 0x{:x}",self.accsock);
+		evtcall_log_trace!("accsock 0x{:x} self {:p}",self.accsock,self);
 		self.ooaccrd = 0;
 		self.inacc = 0;
 		self.accrdbuf = Vec::new();
@@ -364,13 +397,52 @@ impl TcpSockHandle {
 			self.accrdbuf.push(0);
 		}
 		assert!(self.acceptfunc.is_some());
+		//evtcall_debug_buffer_trace!(self.accrdbuf.as_ptr(),1024,"accrdbuf");
 
 		unsafe {
 			let _dretptr = (&mut dret) as LPDWORD;
-			let _outbuf = (self.accrdbuf.as_ptr() as *mut u8) as LPVOID;
+			let _outbuf = (self.accrdbuf.as_mut_ptr() as *mut u8) as LPVOID;
 			let _localaddrlen = (std::mem::size_of::<SOCKADDR_IN>() + 16) as DWORD;
+			//let _outlen = 1024 - (_localaddrlen * 2);
+			let _outlen =  0;
 			let _ovptr = &mut self.accov as LPOVERLAPPED;
-			bret = self.acceptfunc.as_ref().unwrap()(self.sock,self.accsock,_outbuf,0,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
+			evtcall_log_trace!("accept sock  0x{:x} accsock 0x{:x} _outbuf {:p} _localaddrlen 0x{:x} _outlen 0x{:x} dret {}",self.sock,self.accsock,_outbuf,_localaddrlen,_outlen,dret);
+
+			#[cfg(target_pointer_width = "64")]
+			{
+				let np :*const u64 = std::mem::transmute(self.acceptfunc.as_ref().unwrap()) ;
+				let cp :u64 = *np;
+				let _callfn :unsafe extern "system" fn(
+					sListenSocket: SOCKET,
+					sAcceptSocket: SOCKET,
+					lpOutputBuffer: PVOID,
+					dwReceiveDataLength: DWORD,
+					dwLocalAddressLength: DWORD,
+					dwRemoteAddressLength: DWORD,
+					lpdwBytesReceived: LPDWORD,
+					lpOverlapped: LPOVERLAPPED,
+					) -> BOOL = std::mem::transmute(cp);
+				bret = _callfn(self.sock,self.accsock,_outbuf,0,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
+			}
+
+			#[cfg(target_pointer_width = "32")]
+			{
+				let np :*const u32 =  std::mem::transmute(self.acceptfunc.as_ref().unwrap());
+				let cp :u32 = *np;
+				let callfn :unsafe extern "system" fn(
+					sListenSocket: SOCKET,
+					sAcceptSocket: SOCKET,
+					lpOutputBuffer: PVOID,
+					dwReceiveDataLength: DWORD,
+					dwLocalAddressLength: DWORD,
+					dwRemoteAddressLength: DWORD,
+					lpdwBytesReceived: LPDWORD,
+					lpOverlapped: LPOVERLAPPED,
+					) -> BOOL = std::mem::transmute(cp);
+				//bret = callfn(self.sock,self.accsock,_outbuf,0,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
+			}
+
+			//bret = self.acceptfunc.as_ref().unwrap()(self.sock,self.accsock,_outbuf,_outlen,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
 		}
 
 		if bret == FALSE {
@@ -438,6 +510,7 @@ impl TcpSockHandle {
 
 		create_event_safe!(retv.accov.hEvent,"connov handle");
 
+		evtcall_log_trace!("sock 0x{:x} backlog {}",retv.sock,backlog);
 		unsafe {
 			iret = listen(retv.sock,backlog);
 		}
@@ -492,6 +565,7 @@ impl TcpSockHandle {
 		let mut dret :DWORD = 0;
 		let ret :u32;
 
+		evtcall_log_trace!(" ");
 		match self.mtype {
 			TcpSockType::SockServerType => {},
 			_ => {evtcall_new_error!{SockHandleError,"not valid type for accept"}}
@@ -499,23 +573,26 @@ impl TcpSockHandle {
 
 		if self.inacc > 0 {
 			let bret :BOOL;
+			evtcall_log_trace!("sock 0x{:x}",self.sock);
 			set_errno!(0);
 			unsafe {
 				let _hd = self.sock as HANDLE;
 				let _ovptr = (&mut self.accov) as LPOVERLAPPED;
 				let _dptr = (&mut dret) as LPDWORD;
+				evtcall_log_trace!("_dptr {:p} dret {}",_dptr,dret);
 				bret = GetOverlappedResult(_hd,_ovptr,_dptr,FALSE);
 			}
 
 			if bret == FALSE {
 				ret = get_errno_direct!();
-				evtcall_log_trace!("ret {}",ret);
+				evtcall_log_trace!("sock 0x{:x} bret {} ret {}",self.sock,bret,ret);
 				if ret == ERROR_IO_INCOMPLETE || ret == ERROR_IO_PENDING {
 					/*not completed*/
 					return Ok(0);
 				}
 				evtcall_new_error!{SockHandleError,"complete accept error {}",ret}
 			}
+			evtcall_log_trace!("bret {} dret {}",bret,dret);
 			self.ooaccrd = dret;
 			if self.ooaccrd > 0 {
 				evtcall_debug_buffer_trace!(self.accrdbuf.as_ptr(),self.ooaccrd,"accept read buffer");
@@ -941,7 +1018,6 @@ impl TcpSockHandle {
 				SetLastError(0);
 				bret = GetOverlappedResult(_hd,_ovptr,_dretptr,FALSE);
 			}
-			evtcall_log_trace!("sock 0x{:x} self {:p}",self.sock,self);
 			if bret == FALSE {
 				retu = get_errno_direct!();
 				wsaerru = get_wsa_errno_direct!();

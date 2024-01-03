@@ -239,9 +239,9 @@ impl EvtMain {
 			let dret :DWORD;
 
 			if handles.len() > 0 {
-				for h in handles.iter() {
-					evtcall_log_trace!("h 0x{:x}",*h as u64);
-				}
+				/*for _h in handles.iter() {
+					evtcall_log_trace!("h 0x{:x}",*_h as u64);
+				}*/
 				unsafe {
 					dret = WaitForMultipleObjectsEx(handles.len() as DWORD,handles.as_ptr(),FALSE,timeout,FALSE);
 				}				
@@ -256,10 +256,10 @@ impl EvtMain {
 			let timeguids = self.get_time_guids();
 			evtcall_log_trace!("dret 0x{:x}",dret);
 			if dret >= WAIT_OBJECT_0 && dret < ( WAIT_OBJECT_0 + (handles.len() as DWORD)) {
+				evtcall_log_trace!(" ");
 				if guids.len() > (dret - WAIT_OBJECT_0) as usize {
-
 					let curguid = guids[(dret as usize) - (WAIT_OBJECT_0 as usize)];
-					evtcall_log_trace!("hdl 0x{:x}",handles[(dret as usize) - (WAIT_OBJECT_0 as usize)] as u64);
+					//evtcall_log_trace!("hdl 0x{:x}",handles[(dret as usize) - (WAIT_OBJECT_0 as usize)] as u64);
 					let mut findev :Option<EvtCallWindows> = None;
 					match self.evtmaps.get(&curguid) {
 						Some(ev) => {
@@ -279,7 +279,7 @@ impl EvtMain {
 						}
 					}					
 				}
-				evtcall_log_trace!(" ");
+				//evtcall_log_trace!(" ");
 			}
 
 			for g in timeguids.iter() {

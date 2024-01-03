@@ -857,7 +857,7 @@ impl EvtChatServer {
 	}
 
 	fn _inner_accept(&mut self) -> Result<(),Box<dyn Error>> {
-		debug_trace!(" ");
+		debug_trace!("self {:p}",self);
 		if self.inacc == 0 {
 			loop {
 				debug_trace!(" ");
@@ -978,10 +978,17 @@ impl EvtChatServer {
 
 impl EvtCall for EvtChatServer {
 	fn handle(&mut self,evthd :u64, _evttype :u32,evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+		debug_trace!("self {:p}",self);
 		if evthd == self.exithd {
-			return evtmain.break_up();
+			evtmain.break_up()?;
+		} else if evthd == self.acchd {
+			self.accept_proc()?;
+		} else {
+			extargs_new_error!{EvtChatError,"not support evthd 0x{:x}",evthd}
 		}
-		return self.accept_proc();
+		//debug_trace!(" ");
+		Ok(())
+		
 	}
 
 	fn close_event(&mut self,_evthd :u64, _evttype :u32, _evtmain :&mut EvtMain)  {
