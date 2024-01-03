@@ -65,11 +65,17 @@ fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	let _ = init_socket()?;
 	exithd = init_exit_handle()?;
 	evcli = EvtChatClient::connect_client(&ipaddr,port,5000,exithd,&mut evtmain)?;
+	debug_trace!(" ");
 	let _ = evtmain.main_loop()?;
+	debug_trace!(" ");
 	evcli.close();
+	debug_trace!(" ");
 	evtmain.close();
+	debug_trace!(" ");
 	fini_exit_handle();
+	debug_trace!(" ");
 	fini_socket();
+	debug_trace!(" ");
 	Ok(())
 }
 

@@ -7,6 +7,7 @@ use winapi::um::wincontypes::{INPUT_RECORD,KEY_EVENT};
 use winapi::um::errhandlingapi::{GetLastError};
 use winapi::shared::minwindef::{DWORD,TRUE,FALSE,BOOL};
 use winapi::um::handleapi::{CloseHandle};
+//use backtrace::Backtrace;
 
 
 const RDBUF_SIZE : usize = 256;
@@ -147,12 +148,12 @@ impl Drop for EvtChatClient {
 
 impl EvtCall for EvtChatClient {
 	fn handle(&mut self,evthd :u64, _evttype :u32,evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
-		debug_trace!("evthd 0x{:x}",evthd);
-		if evthd == self.sock.get_connect_handle() {
+		debug_trace!("evthd 0x{:x} self {:p} connhd 0x{:x}",evthd,self,self.connhd);
+		if evthd == self.connhd {
 			self.connect_handle()?;
-		} else if evthd == self.sock.get_write_handle() {
+		} else if evthd == self.wrhd {
 			self.sock_write_proc()?;
-		} else if evthd == self.sock.get_read_handle() {
+		} else if evthd == self.rdhd {
 			self.sock_read_proc()?;
 		} else if evthd == self.stdinrd.get_handle() {
 			self.stdin_read_proc()?;
@@ -162,10 +163,14 @@ impl EvtCall for EvtChatClient {
 		} else {
 			extargs_new_error!{EvtChatError,"not recognize evthd 0x{:x}",evthd}
 		}
+		debug_trace!("exit handle {:p}",self);
 		Ok(())
 	}	
 
 	fn close_event(&mut self,_evthd :u64, _evttype :u32, _evtmain :&mut EvtMain)  {
+		debug_trace!("self {:p}",self);
+		//let bt = Backtrace::new();
+		//debug_trace!("{:?}",bt);
 		self.close_event_inner();
 		return;
 	}
@@ -177,6 +182,7 @@ impl EvtTimer for EvtChatClient {
 	}
 
 	fn close_timer(&mut self, _guid :u64, _evtmain :&mut EvtMain) {
+		debug_trace!("self {:p}",self);
 		self.close_timer_inner();
 		return;
 	}
@@ -228,6 +234,9 @@ impl EvtChatClient {
 		return;
 	}
 	fn close_timer_inner(&mut self) {
+		//let bt = Backtrace::new();
+		debug_trace!("insertconntimeout {} self {:p}",self.insertconntimeout,self);
+		//debug_trace!("{:?}",bt);
 		if self.insertconntimeout > 0 {
 			unsafe {
 				let _ = &(*(self.evmain)).remove_timer(self.connguid);
@@ -388,9 +397,11 @@ impl EvtChatClient {
 			if self.rdlen == self.rdvecs.capacity() {
 				self._write_stdout_inner()?;
 			}
-			debug_trace!("rdeidx {}",self.rdeidx);
+			debug_trace!("rdeidx {} self {:p} sock {:p}",self.rdeidx,self,&(self.sock));
 			let _rdptr = (&mut self.rdvecs[self.rdeidx]) as *mut u8;
-			let completed = self.sock.read(_rdptr,1)?;
+			debug_trace!("_rdptr 0x{:p} self.rdvecs 0x{:p}",_rdptr, self.rdvecs.as_ptr());
+			let completed = (&mut self.sock).read(_rdptr,1)?;
+			debug_trace!("completed {} self {:p}",completed,self);
 			if completed  == 0 {
 				self._write_stdout_inner()?;
 				break;
@@ -402,7 +413,7 @@ impl EvtChatClient {
 			debug_trace!("rdlen 0x{:x}",self.rdlen);
 		}	
 
-		debug_trace!("_read_sock_inner over");
+		debug_trace!("_read_sock_inner over self {:p}",self);
 		if self.insertrd == 0 {
 			self.rdhd = self.sock.get_read_handle();
 			unsafe {
@@ -501,7 +512,7 @@ impl EvtChatClient {
 
 		evtmain.add_event(Arc::new(&mut retv),retv.exithd,READ_EVENT)?;
 		retv.inexit = 1;
-		debug_trace!("insert exithd 0x{:x}",exithd);
+		debug_trace!("insert exithd 0x{:x} {:p}",exithd,&retv);
 
 		Ok(retv)
 	}
@@ -542,8 +553,8 @@ impl EvtChatClient {
 				unsafe {
 					let _ = &(*self.evmain).remove_timer(self.connguid);
 				}
-				debug_trace!("remove conn timer 0x{:x}",self.connguid);
 				self.insertconntimeout = 0;
+				debug_trace!("remove conn timer 0x{:x} insertconntimeout {} self {:p}",self.connguid,self.insertconntimeout,self);
 			}
 
 			debug_trace!("connect {} => {}",self.sock.get_self_format(),self.sock.get_peer_format());
@@ -551,6 +562,7 @@ impl EvtChatClient {
 			self._read_sock_inner()?;
 			self.stdin_read_proc()?;
 		}
+		debug_trace!("exit connect_handle {:p}",self);
 		Ok(())
 	}
 
@@ -652,12 +664,15 @@ impl EvtChatServerConn {
 	fn _read_sock_inner(&mut self) -> Result<(),Box<dyn Error>> {
 		let mut completed :i32;
 		loop {
+			debug_trace!("self {:p}",self);
 			if self.rdlen == self.rdbuf.len() {
 				self._add_sock_write()?;
 			}
 
+			debug_trace!("self {:p}",self);
 			let _rdptr = &mut self.rdbuf[self.rdeidx];
 			completed = self.sock.read(_rdptr,1)?;
+			debug_trace!("read completed {}",completed);
 			if completed == 0 {
 				/*to add write socket*/
 				self._add_sock_write()?;

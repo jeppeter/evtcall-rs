@@ -129,6 +129,7 @@ macro_rules! close_handle_safe {
 	($hdval : expr,$name :expr) => {
 		let _bret :BOOL;
 		let _errval :i32;
+		evtcall_log_trace!("close {} 0x{:x}",$name,$hdval as u64);
 		if $hdval != NULL_HANDLE_VALUE {
 			unsafe {
 				_bret = CloseHandle($hdval);
@@ -146,8 +147,8 @@ macro_rules! close_socket_safe {
 	($sockval :expr , $name :expr) => {
 		let _errval :i32;
 		let _iret :c_int;
-
-		if $sockval != INVALID_SOCKET {
+		evtcall_log_trace!("close {} sock 0x{:x}",$name,$sockval as u64);
+		if $sockval != INVALID_SOCKET  {
 			unsafe {
 				_iret = closesocket($sockval);
 			}
@@ -761,8 +762,8 @@ impl TcpSockHandle {
 			retv.sock = socket(AF_INET,SOCK_STREAM,0);
 		}
 
-		evtcall_log_trace!(" ");
 
+		evtcall_log_trace!("sock 0x{:x}",retv.sock);
 		if retv.sock == INVALID_SOCKET {
 			iret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"socket client error {}",iret}
@@ -774,8 +775,6 @@ impl TcpSockHandle {
 			iret = ioctlsocket(retv.sock,FIONBIO,_bptr);
 		}
 
-		evtcall_log_trace!(" ");
-
 		if iret == SOCKET_ERROR {
 			iret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"ioctlsocket FIONBIO error {}",iret}
@@ -783,11 +782,8 @@ impl TcpSockHandle {
 
 		retv._bind_addr(localip,localport)?;
 
-		evtcall_log_trace!(" ");
 
 		create_event_safe!(retv.connov.hEvent,"connov event");
-
-		evtcall_log_trace!(" ");
 
 		retv._get_connect_func(&guid)?;
 		let completed = retv._call_connect_func(ipaddr,port)?;
@@ -833,7 +829,7 @@ impl TcpSockHandle {
 			retv._inner_make_read_write()?;
 		}
 
-		evtcall_log_trace!("connect [{}:{}] inconn {}",ipaddr,port,retv.inconn);
+		evtcall_log_trace!("connect [{}:{}] inconn {} self {:p}",ipaddr,port,retv.inconn,&retv);
 		Ok(retv)
 	}
 
@@ -851,16 +847,16 @@ impl TcpSockHandle {
 			rdbuf.len = self.rdlen;
 			rdbuf.buf = self.rdptr;
 			flags = MSG_PARTIAL as DWORD;
+			set_errno!(0);
 			unsafe {
 				let _rdptr = &mut rdbuf;
 				let _flagptr = &mut flags;
 				let _dretptr = &mut dret;
 				let _ovptr = &mut self.rdov;
-				let _funcptr = None;
-				iret = WSARecv(self.sock,_rdptr,1,_dretptr,_flagptr,_ovptr,_funcptr);
+				//let _funcptr = None;
+				iret = WSARecv(self.sock,_rdptr,1,_dretptr,_flagptr,_ovptr,None);
 			}
 
-			evtcall_log_trace!("WSARecv {}",iret);
 			if iret == 0 {
 				evtcall_log_trace!("dret {}",dret);
 				if dret == 0 {
@@ -884,7 +880,8 @@ impl TcpSockHandle {
 			if eret == WSA_IO_PENDING {
 				return Ok(());
 			}
-			evtcall_new_error!{SockHandleError,"closed local[{}:{}] peer[{}:{}] error [{}]",self.localaddr,self.localport,self.peeraddr,self.peerport,eret}
+			evtcall_log_error!("read  peer[{}:{}] => local[{}:{}] error [{}] iret {}",self.peeraddr,self.peerport,self.localaddr,self.localport,eret,iret);
+			evtcall_new_error!{SockHandleError,"read  peer[{}:{}] => local[{}:{}] error [{}]",self.peeraddr,self.peerport,self.localaddr,self.localport,eret}
 		}
 	}
 
@@ -944,6 +941,7 @@ impl TcpSockHandle {
 				SetLastError(0);
 				bret = GetOverlappedResult(_hd,_ovptr,_dretptr,FALSE);
 			}
+			evtcall_log_trace!("sock 0x{:x} self {:p}",self.sock,self);
 			if bret == FALSE {
 				retu = get_errno_direct!();
 				wsaerru = get_wsa_errno_direct!();

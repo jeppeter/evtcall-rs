@@ -270,14 +270,16 @@ impl EvtMain {
 
 					if findev.is_some() {
 						let c = findev.unwrap();
-						let b = Arc::as_ptr(&c.evt);
+						let b = Arc::as_ptr(&c.evt.clone());
 						let evttype :u32 = c.evttype;
 						let hd :u64 = c.evthd;
+						evtcall_log_trace!("b {:p}",b);
 						unsafe {
 							(&mut (*(*b))).handle(hd,evttype,self)?;
 						}
 					}					
 				}
+				evtcall_log_trace!(" ");
 			}
 
 			for g in timeguids.iter() {
