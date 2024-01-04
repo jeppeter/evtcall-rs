@@ -232,11 +232,23 @@ impl EvtMain {
 		return retv;
 	}
 
+	fn _debug_mode_call(&mut self) {
+		evtcall_log_trace!("will call debug_mode");
+		for (_,v) in self.evtmaps.iter_mut() {
+			let b = Arc::as_ptr(&v.evt.clone());
+			unsafe {
+				(&mut (*(*b))).debug_mode(file!(),line!());
+			}
+		}
+	}
+
 	pub fn main_loop(&mut self) -> Result<(),Box<dyn Error>> {
 		while self.exited == 0 {
 			let (handles,guids)  = self.get_handles();
 			let timeout = self.get_timeout(30000);
 			let dret :DWORD;
+
+			self._debug_mode_call();
 
 			if handles.len() > 0 {
 				/*for _h in handles.iter() {

@@ -340,7 +340,7 @@ impl TcpSockHandle {
 			evtcall_new_error!{SockHandleError,"cannot get WSAIoctl error {}",iret}
 		}
 		evtcall_debug_buffer_trace!((guid as *const GUID)as *const u8,std::mem::size_of::<GUID>(),"acceptfunc get value {:p}",self.acceptfunc.as_ref().unwrap());
-		#[cfg(target_pointer_width  = "64")]
+		/*#[cfg(target_pointer_width  = "64")]
 		{
 			let np :*const u64 = unsafe { std::mem::transmute(self.acceptfunc.as_ref().unwrap()) };
 			let cp :u64 = unsafe{*np};
@@ -352,7 +352,7 @@ impl TcpSockHandle {
 				) -> () = unsafe {std::mem::transmute(cp)};
 			let ps :*const u8 = unsafe {std::mem::transmute(fs)};
 			evtcall_log_trace!("ps {:p}",ps);
-			evtcall_debug_buffer_trace!(ps ,0x20,"accept func dump");			
+			evtcall_debug_buffer_trace!(ps ,0x20,"accept func dump");
 		}
 
 		#[cfg(target_pointer_width  = "32")]
@@ -368,7 +368,7 @@ impl TcpSockHandle {
 			let ps :*const u8 = unsafe {std::mem::transmute(fs)};
 			evtcall_log_trace!("ps {:p}",ps);
 			evtcall_debug_buffer_trace!(ps ,0x20,"accept func dump");			
-		}
+		}*/
 
 		//evtcall_log_trace!("acceptfunc {:p}",self.acceptfunc.as_ref().unwrap());
 		Ok(())
@@ -422,7 +422,9 @@ impl TcpSockHandle {
 					lpdwBytesReceived: LPDWORD,
 					lpOverlapped: LPOVERLAPPED,
 					) -> BOOL = std::mem::transmute(cp);
-				bret = _callfn(self.sock,self.accsock,_outbuf,0,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
+				//bret = _callfn(self.sock,self.accsock,_outbuf,0,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
+				//bret = FALSE;
+				//set_errno!(WSA_IO_PENDING);
 			}
 
 			#[cfg(target_pointer_width = "32")]
@@ -442,11 +444,12 @@ impl TcpSockHandle {
 				//bret = callfn(self.sock,self.accsock,_outbuf,0,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
 			}
 
-			//bret = self.acceptfunc.as_ref().unwrap()(self.sock,self.accsock,_outbuf,_outlen,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
+			bret = self.acceptfunc.as_ref().unwrap()(self.sock,self.accsock,_outbuf,_outlen,_localaddrlen,_localaddrlen,_dretptr,_ovptr);
 		}
 
 		if bret == FALSE {
 			ret = get_wsa_errno!();
+			evtcall_log_trace!("self.sock 0x{:x} self.accsock 0x{:x} self {:p}",self.sock,self.accsock,self);
 			if ret != -WSA_IO_PENDING {
 				evtcall_new_error!{SockHandleError,"call acceptfunc error {}",ret}
 			}
@@ -565,7 +568,7 @@ impl TcpSockHandle {
 		let mut dret :DWORD = 0;
 		let ret :u32;
 
-		evtcall_log_trace!(" ");
+		evtcall_log_trace!("self {:p}",self);
 		match self.mtype {
 			TcpSockType::SockServerType => {},
 			_ => {evtcall_new_error!{SockHandleError,"not valid type for accept"}}
@@ -574,6 +577,7 @@ impl TcpSockHandle {
 		if self.inacc > 0 {
 			let bret :BOOL;
 			evtcall_log_trace!("sock 0x{:x}",self.sock);
+			evtcall_log_trace!("self.sock 0x{:x} self.accsock 0x{:x} self {:p}",self.sock,self.accsock,self);
 			set_errno!(0);
 			unsafe {
 				let _hd = self.sock as HANDLE;
@@ -592,13 +596,16 @@ impl TcpSockHandle {
 				}
 				evtcall_new_error!{SockHandleError,"complete accept error {}",ret}
 			}
-			evtcall_log_trace!("bret {} dret {}",bret,dret);
-			self.ooaccrd = dret;
+			evtcall_log_trace!("bret {} dret {} 0x{:x}",bret,dret,dret);
+			//evtcall_debug_buffer_trace!(self.accrdbuf.as_ptr(),self.accrdbuf.len(),"accept read");
+			evtcall_log_trace!("self.sock 0x{:x} self.accsock 0x{:x}",self.sock,self.accsock);
+			//self.ooaccrd = dret;
 			if self.ooaccrd > 0 {
 				evtcall_debug_buffer_trace!(self.accrdbuf.as_ptr(),self.ooaccrd,"accept read buffer");
 			}
 			self.inacc = 0;
 			completed = 1;
+			evtcall_log_trace!(" ");
 		}
 		Ok(completed)
 	}
@@ -658,7 +665,7 @@ impl TcpSockHandle {
 	pub fn accept_socket(&mut self) -> Result<Self,Box<dyn Error>> {
 		let mut retv :Self = Self::_default_new(TcpSockType::SockServerConnType);
 		let sret :c_int;
-		let sv :u32;
+		let sv :i32;
 		evtcall_log_trace!(" ");
 		match self.mtype {
 			TcpSockType::SockServerType => {
@@ -680,20 +687,21 @@ impl TcpSockHandle {
 		retv.sock = self.accsock;
 		self.accsock = INVALID_SOCKET;
 
-		evtcall_log_trace!(" ");
+		evtcall_log_trace!("retv.sock 0x{:x} self.sock 0x{:x}",retv.sock,self.sock);
 
 		unsafe {
-			let _sptr = ((&retv.sock) as *const SOCKET) as *const c_char;
+			let _sptr = ((&self.sock) as *const SOCKET) as *const c_char;
 			let _slen = std::mem::size_of::<SOCKET>() as i32;
 			evtcall_log_trace!("_sptr {:p} _slen {}",_sptr,_slen);
 			sret = setsockopt(retv.sock,SOL_SOCKET,SO_UPDATE_ACCEPT_CONTEXT,_sptr,_slen);
 		}
 
-		evtcall_log_trace!(" ");
+		//evtcall_log_trace!(" ");
 
 		if sret != 0 {
-			sv = get_errno_direct!();
-			evtcall_new_error!{SockHandleError,"get [{}:{}] SO_UPDATE_ACCEPT_CONTEXT error {}",retv.localaddr,retv.localport,sv}
+			sv = get_wsa_errno_direct!();
+			evtcall_log_trace!("retv.sock 0x{:x} self.sock 0x{:x} get sv {}",retv.sock,self.sock,sv);
+			evtcall_new_error!{SockHandleError,"get [{}:{}] SO_UPDATE_ACCEPT_CONTEXT error sret {} {}",retv.localaddr,retv.localport,sret,sv}
 		}
 
 		if self.ooaccrd > 0 {
@@ -1204,6 +1212,7 @@ impl TcpSockHandle {
 	}
 
 	pub fn get_self_format(&self) -> String {
+		evtcall_log_trace!("self {:p} sock 0x{:x} accsock 0x{:x}",self,self.sock,self.accsock);
 		return format!("{}:{}",self.localaddr,self.localport);
 	}
 

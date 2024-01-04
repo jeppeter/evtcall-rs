@@ -167,6 +167,12 @@ impl EvtCall for EvtChatClient {
 		Ok(())
 	}	
 
+	fn debug_mode(&mut self,_fname :&str, _lineno :u32) {
+		debug_trace!("debugmode local {} remote {}",self.sock.get_self_format(),self.sock.get_peer_format());
+		return;
+	}
+
+
 	fn close_event(&mut self,_evthd :u64, _evttype :u32, _evtmain :&mut EvtMain)  {
 		debug_trace!("self {:p}",self);
 		//let bt = Backtrace::new();
@@ -824,6 +830,11 @@ impl EvtCall for EvtChatServerConn {
 		Ok(())
 	}
 
+	fn debug_mode(&mut self,_fname :&str, _lineno :u32) {
+		return;
+	}
+
+
 	fn close_event(&mut self,_evthd :u64, _evttype :u32, _evtmain :&mut EvtMain)  {
 		self.close_event_inner();
 	}
@@ -919,20 +930,21 @@ impl EvtChatServer {
 			retv._inner_accept()?;
 		} else {
 			retv.acchd = retv.sock.get_accept_handle();
-			debug_trace!("add accept 0x{:x}",retv.acchd);
+			debug_trace!("add accept 0x{:x} retv {:p}",retv.acchd,&retv);
 			unsafe {
 				(*retv.evmain).add_event(Arc::new(&mut retv as *mut EvtChatServer as *mut dyn EvtCall),retv.acchd,READ_EVENT)?;
 			}
 			retv.inacc = 1;
 		}
 
-		debug_trace!("listen on {}",retv.sock.get_self_format());
+		debug_trace!("listen on {} retv {:p}",retv.sock.get_self_format(),&retv);
 
 		unsafe {
 			let _ = &(*retv.evmain).add_event(Arc::new(&mut retv as  *mut dyn EvtCall),retv.exithd,READ_EVENT)?;
 		}
 		retv.inexit = 1;
 		assert!(retv.inacc > 0);
+		retv.debug_mode(file!(),line!());
 		Ok(retv)
 	}
 
@@ -989,6 +1001,12 @@ impl EvtCall for EvtChatServer {
 		//debug_trace!(" ");
 		Ok(())
 		
+	}
+
+	fn debug_mode(&mut self,fname :&str, lineno :u32) {
+		debug_trace!("{}:{}",fname,lineno);
+		debug_trace!("[{}:{}]debugmode local {} remote {}",fname,lineno,self.sock.get_self_format(),self.sock.get_peer_format());
+		return;
 	}
 
 	fn close_event(&mut self,_evthd :u64, _evttype :u32, _evtmain :&mut EvtMain)  {

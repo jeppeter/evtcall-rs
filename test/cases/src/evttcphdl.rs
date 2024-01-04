@@ -100,6 +100,7 @@ fn evchatsvr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	let _ = init_socket()?;
 	exithd = init_exit_handle()?;
 	evsvr = EvtChatServer::bind_server(&ipaddr,port,5,exithd,&mut evtmain)?;
+	evsvr.debug_mode(file!(),line!());
 	let _ = evtmain.main_loop()?;	
 	evsvr.close();
 	evtmain.close();
