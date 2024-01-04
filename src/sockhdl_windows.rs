@@ -61,6 +61,7 @@ struct TcpSockHandleInner {
 	iscloseerr : bool,
 }
 
+#[derive(Clone)]
 pub struct TcpSockHandle {
 	inner :Arc<RefCell<TcpSockHandleInner>>,
 }
@@ -1225,6 +1226,10 @@ impl TcpSockHandleInner {
 	pub (crate) fn get_peer_format(&self) -> String {
 		return format!("{}:{}",self.peeraddr,self.peerport);
 	}
+
+	pub (crate) fn get_sock_real(&self) -> u64 {
+		return self.sock as u64;
+	}
 }
 
 impl TcpSockHandle {
@@ -1330,6 +1335,10 @@ impl TcpSockHandle {
 
 	pub fn get_peer_format(&self) -> String {
 		return self.inner.borrow().get_peer_format();
+	}
+
+	pub fn get_sock_real(&self) -> u64 {
+		return self.inner.borrow().get_sock_real();
 	}
 }
 
