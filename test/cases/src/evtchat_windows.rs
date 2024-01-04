@@ -904,13 +904,14 @@ impl EvtChatServerConnInner {
 
 	pub fn close(&mut self) {
 		self.close_event_inner();
+		assert!(self.svr == std::ptr::null_mut::<EvtChatServerInner>());
+		assert!(self.evmain == std::ptr::null_mut::<EvtMain>());
 		self.wrhd = INVALID_EVENT_HANDLE;
 		self.rdhd = INVALID_EVENT_HANDLE;
-		self.rdbuf = Vec::with_capacity(RDBUF_SIZE);
-		unsafe {
-			self.rdbuf.set_len(RDBUF_SIZE);
-		}
+		assert!(self.inrd == 0);
+		assert!(self.inwr == 0);
 
+		self.rdbuf = Vec::new();
 		self.rdsidx = 0;
 		self.rdeidx = 0;
 		self.rdlen = 0;
@@ -1153,7 +1154,12 @@ impl EvtChatServerInner {
 
 	pub fn close(&mut self) {
 		self.close_event_inner();
-		self.acchd = INVALID_EVENT_HANDLE;		
+		assert!(self.evmain == std::ptr::null_mut::<EvtMain>());
+		assert!(self.accsocks.len() == 0);
+		assert!(self.inacc == 0);		
+		self.acchd = INVALID_EVENT_HANDLE;
+		self.exithd = INVALID_EVENT_HANDLE;
+		assert!(self.inexit == 0);
 	}
 }
 
@@ -1190,7 +1196,10 @@ impl EvtChatServer {
 			inner :ninner,
 		};
 		let p = retv.clone();
-		retv.inner.borrow_mut().bind_server_after(p)?;
+		{
+			retv.inner.borrow_mut().bind_server_after(p)?;
+		}
+		
 		Ok(retv)
 	}
 
