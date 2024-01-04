@@ -3,6 +3,7 @@
 use crate::interface::*;
 use crate::consts::*;
 use std::sync::Arc;
+use std::cell::RefCell;
 use std::error::Error;
 use std::collections::HashMap;
 use crate::timeop::*;
@@ -71,15 +72,15 @@ macro_rules! close_handle_safe {
 
 #[derive(Clone)]
 struct EvtCallWindows {
-	evt :Arc<*mut dyn EvtCall>,
+	evt :Arc<RefCell<dyn EvtCall>>,
 	evthd : u64,
 	evttype : u32,
 }
 
 impl EvtCallWindows {
-	fn new(av :Arc<* mut dyn EvtCall>,evthd :u64, evttype :u32) -> Result<Self,Box<dyn Error>> {
+	fn new(av :Arc<RefCell<dyn EvtCall>>,evthd :u64, evttype :u32) -> Result<Self,Box<dyn Error>> {
 		Ok(Self{
-			evt : av,
+			evt : av.clone(),
 			evthd : evthd,
 			evttype : evttype,
 		})
@@ -88,16 +89,16 @@ impl EvtCallWindows {
 
 #[derive(Clone)]
 struct EvtTimerWindows {
-	timer :Arc<*mut dyn EvtTimer>,
+	timer :Arc<RefCell<dyn EvtTimer>>,
 	startticks :u64,
 	interval : i32,
 	conti :bool,
 }
 
 impl EvtTimerWindows {
-	fn new(av :Arc<* mut dyn EvtTimer>, interval : i32,conti :bool) -> Result<Self,Box<dyn Error>> {
+	fn new(av :Arc<RefCell<dyn EvtTimer>>, interval : i32,conti :bool) -> Result<Self,Box<dyn Error>> {
 		Ok(Self {
-			timer : av,
+			timer : av.clone(),
 			interval : interval,
 			conti : conti,
 			startticks : get_cur_ticks(),
@@ -136,7 +137,7 @@ impl EvtMain {
 		Ok(retv)
 	}
 
-	pub fn add_timer(&mut self,bv :Arc<*mut dyn EvtTimer>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
+	pub fn add_timer(&mut self,bv :Arc<RefCell<dyn EvtTimer>>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
 		self.guid += 1;
 		let ntimer :EvtTimerWindows = EvtTimerWindows::new(bv,interval,conti)?;
 		evtcall_log_trace!("insert timer 0x{:x}",self.guid);
@@ -144,7 +145,7 @@ impl EvtMain {
 		Ok(self.guid)
 	}
 
-	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>,evthd :u64,evttype :u32) -> Result<(),Box<dyn Error>> {
+	pub fn add_event(&mut self,bv :Arc<RefCell<dyn EvtCall>>,evthd :u64,evttype :u32) -> Result<(),Box<dyn Error>> {
 
 		if evthd == 0 || evthd == INVALID_EVENT_HANDLE {
 			evtcall_new_error!{MainLoopWindowsError,"not valid evthd 0x{:x}",evthd}
@@ -235,10 +236,8 @@ impl EvtMain {
 	fn _debug_mode_call(&mut self) {
 		evtcall_log_trace!("will call debug_mode");
 		for (_,v) in self.evtmaps.iter_mut() {
-			let b = Arc::as_ptr(&v.evt.clone());
-			unsafe {
-				(&mut (*(*b))).debug_mode(file!(),line!());
-			}
+			let b = v.evt.clone();
+			b.borrow_mut().debug_mode(file!(),line!());
 		}
 	}
 
@@ -282,13 +281,11 @@ impl EvtMain {
 
 					if findev.is_some() {
 						let c = findev.unwrap();
-						let b = Arc::as_ptr(&c.evt.clone());
+						let b = c.evt.clone();
 						let evttype :u32 = c.evttype;
 						let hd :u64 = c.evthd;
 						evtcall_log_trace!("b {:p}",b);
-						unsafe {
-							(&mut (*(*b))).handle(hd,evttype,self)?;
-						}
+						b.borrow_mut().handle(hd,evttype,self)?;
 					}					
 				}
 				//evtcall_log_trace!(" ");
@@ -305,10 +302,8 @@ impl EvtMain {
 
 				if findtv.is_some() {
 					let c = findtv.unwrap();
-					let b = Arc::as_ptr(&c.timer);
-					unsafe {
-						(&mut (*(*b))).timer(*g,self)?;	
-					}
+					let b = c.timer.clone();
+					b.borrow_mut().timer(*g,self)?;
 
 					if c.conti {
 						match self.timermaps.get_mut(g) {
@@ -351,12 +346,10 @@ impl EvtMain {
 
 			if findev.is_some() {
 				let c = findev.unwrap();
-				let b = Arc::as_ptr(&c.evt);
+				let b = c.evt.clone();
 				let evttype :u32 = c.evttype;
 				let hd :u64 = c.evthd;
-				unsafe {
-					(&mut (*(*b))).close_event(hd,evttype,self);
-				}
+				b.borrow_mut().close_event(hd,evttype,self);
 			}
 			idx += 1;
 		}
@@ -373,15 +366,13 @@ impl EvtMain {
 				Some(cv) => {
 					findtv = Some(cv.clone());
 				},
-				None => {}
+				None => {},
 			}
 
 			if findtv.is_some() {
 				let c = findtv.unwrap();
-				let b = Arc::as_ptr(&c.timer);
-				unsafe {
-					(&mut (*(*b))).close_timer(*g,self);	
-				}
+				let b = c.timer.clone();
+				b.borrow_mut().close_timer(*g,self);
 			}
 		}
 
