@@ -552,6 +552,7 @@ impl EvtChatClientInner {
 	}
 
 	pub fn close(&mut self) {
+		debug_trace!("close EvtChatClientInner {:p}",self);
 		self.close_timer_inner();
 		self.close_event_inner();
 
@@ -634,7 +635,8 @@ impl EvtChatClient {
 	}
 
 	pub fn close(&mut self) {
-		return self.inner.borrow_mut().close();
+		/*we do not close this*/
+		debug_trace!("Free EvtChatClient {:p}",self);
 	}
 }
 
@@ -903,6 +905,7 @@ impl EvtChatServerConnInner {
 	}
 
 	pub fn close(&mut self) {
+		debug_trace!("close EvtChatServerConnInner {:p}",self);
 		self.close_event_inner();
 		assert!(self.svr == std::ptr::null_mut::<EvtChatServerInner>());
 		assert!(self.evmain == std::ptr::null_mut::<EvtMain>());
@@ -1197,14 +1200,19 @@ impl EvtChatServer {
 		};
 		let p = retv.clone();
 		{
+			debug_trace!("borrow_mut for bind_server_after {:p}",&retv);
 			retv.inner.borrow_mut().bind_server_after(p)?;
 		}
+		debug_trace!("free_mut for bind_server_after {:p}",&retv);
 		
 		Ok(retv)
 	}
 
 	pub fn close(&mut self) {
-		return self.inner.borrow_mut().close();
+		debug_trace!("borrow_mut for close {:p}",self);
+		self.inner.borrow_mut().close();
+		debug_trace!("free_mut for close {:p}",self);
+		return;
 	}
 }
 
