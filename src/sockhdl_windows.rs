@@ -1,6 +1,6 @@
 
 use winapi::um::winnt::{HANDLE,PVOID,LPCWSTR,PSTR};
-use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,getsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen,WSA_IO_PENDING,getpeername,ntohs,getsockname,MSG_PARTIAL,WSARecv,WSASend};
+use winapi::um::winsock2::{SOL_SOCKET,SO_REUSEADDR,setsockopt,getsockopt,socket,SOCKET,INVALID_SOCKET,closesocket,SOCKET_ERROR,htons,bind,LPWSAOVERLAPPED,WSAOVERLAPPED,LPWSAOVERLAPPED_COMPLETION_ROUTINE,WSAIoctl,WSADATA,WSADESCRIPTION_LEN,WSASYS_STATUS_LEN,WSAStartup,WSACleanup,u_long,ioctlsocket,FIONBIO,WSAGetLastError,listen,WSA_IO_PENDING,getpeername,ntohs,getsockname,MSG_PARTIAL,WSARecv,WSASend,WSANOTINITIALISED};
 use winapi::um::mswsock::{LPFN_ACCEPTEX,WSAID_ACCEPTEX,SO_UPDATE_ACCEPT_CONTEXT,LPFN_CONNECTEX,WSAID_CONNECTEX};
 
 use winapi::shared::ws2def::*;
@@ -162,7 +162,9 @@ macro_rules! close_socket_safe {
 
 			if _iret == SOCKET_ERROR {
 				_errval = get_errno!();
-				evtcall_log_warn!("close 0x{:x} {} error {}",$sockval,$name,_errval);
+				if _errval != -WSANOTINITIALISED {
+					evtcall_log_warn!("close 0x{:x} {} error {}",$sockval,$name,_errval);	
+				}				
 			}
 		}
 		$sockval = INVALID_SOCKET;
