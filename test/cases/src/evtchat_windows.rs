@@ -739,6 +739,7 @@ impl EvtChatServerConnInner {
 						self.inwr = 1;
 						return Ok(());
 					}
+					debug_buffer_trace!(_wrptr,_wrlen,"write over {:p}",self);
 				}
 				self.sockwbuf = Vec::new();
 				if self.sockwbufs.len() == 0 {
@@ -801,6 +802,7 @@ impl EvtChatServerConnInner {
 				return Ok(());
 			}
 
+			debug_trace!("read[0x{:x}] 0x{:}",self.rdeidx,self.rdbuf[self.rdeidx]);
 			self.rdeidx += 1;
 			self.rdeidx %= self.rdbuf.capacity();
 			self.rdlen += 1;
@@ -809,6 +811,7 @@ impl EvtChatServerConnInner {
 	}
 
 	pub fn new_after(&mut self,parent:EvtChatServerConn) -> Result<(),Box<dyn Error>> {
+		debug_trace!("EvtChatServerConnInner new {:p}",self);
 		unsafe {
 			self.rdbuf.set_len(RDBUF_SIZE);
 		}
@@ -845,6 +848,9 @@ impl EvtChatServerConnInner {
 			if completed == 0 {
 				return Ok(());
 			}
+			debug_buffer_trace!(self.sockwbuf.as_ptr(),self.sockwbuf.len(),"write complete {:p}",self);
+			/*to write over*/
+			self.sockwbuf = Vec::new();
 
 			unsafe {
 				let _ = &(*self.evmain).remove_event(self.wrhd);
@@ -862,10 +868,17 @@ impl EvtChatServerConnInner {
 				return Ok(());
 			}
 
+
+
 			unsafe {
 				let _ = &(*self.evmain).remove_event(self.rdhd);	
 			}			
 			self.inrd = 0;
+
+			debug_trace!("read[0x{:x}] 0x{:x}",self.rdeidx,self.rdbuf[self.rdeidx]);
+			self.rdeidx += 1;
+			self.rdeidx %= self.rdbuf.len();
+			self.rdlen += 1;
 		}
 		debug_trace!(" ");
 		self._read_sock_inner(parent)?;
