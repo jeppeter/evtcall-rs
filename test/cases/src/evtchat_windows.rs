@@ -95,6 +95,7 @@ impl StdinRd {
 
 	pub fn close(&mut self) {
 		let bret :BOOL;
+		debug_trace!("StdinRd close {:p}",self);
 		if self.rd != INVALID_EVENT_HANDLE as HANDLE {
 			unsafe {
 				bret = CloseHandle(self.rd);
@@ -552,7 +553,7 @@ impl EvtChatClientInner {
 	}
 
 	pub fn close(&mut self) {
-		debug_trace!("close EvtChatClientInner {:p}",self);
+		debug_trace!("EvtChatClientInner close {:p}",self);
 		self.close_timer_inner();
 		self.close_event_inner();
 
@@ -636,7 +637,7 @@ impl EvtChatClient {
 
 	pub fn close(&mut self) {
 		/*we do not close this*/
-		debug_trace!("Free EvtChatClient {:p}",self);
+		debug_trace!("EvtChatClient close {:p}",self);
 	}
 }
 
@@ -688,6 +689,7 @@ struct EvtChatServerConnInner {
 #[derive(Clone)]
 struct EvtChatServerConn {
 	inner :Arc<RefCell<EvtChatServerConnInner>>,
+	socknum : u64,
 }
 
 struct EvtChatServerInner {
@@ -905,7 +907,7 @@ impl EvtChatServerConnInner {
 	}
 
 	pub fn close(&mut self) {
-		debug_trace!("close EvtChatServerConnInner {:p}",self);
+		debug_trace!("EvtChatServerConnInner close {:p}",self);
 		self.close_event_inner();
 		assert!(self.svr == std::ptr::null_mut::<EvtChatServerInner>());
 		assert!(self.evmain == std::ptr::null_mut::<EvtMain>());
@@ -960,20 +962,23 @@ impl EvtChatServerConnInner {
 impl EvtChatServerConn {
 	pub fn new(sock :TcpSockHandle,svr :*mut EvtChatServerInner, evmain :*mut EvtMain) -> Result<Self,Box<dyn Error>> {
 		let ninner = EvtChatServerConnInner::new(sock,svr,evmain)?;
-		let retv :Self = Self {
+		let mut retv :Self = Self {
 			inner : ninner,
+			socknum : 0,
 		};
 		let p = retv.clone();
 		retv.inner.borrow_mut().new_after(p)?;
+		retv.socknum = retv.inner.borrow().get_sock_real();
 		Ok(retv)
 	}
 
 	pub fn get_sock_real(&self) -> u64 {
-		return self.inner.borrow().get_sock_real();
+		return self.socknum;
 	}
 
 	pub fn close(&mut self) {
-		return self.inner.borrow_mut().close();
+		debug_trace!("EvtChatServerConn close {:p}",self);
+		return;
 	}
 	pub fn get_self_format(&self) ->String {
 		return self.inner.borrow().sock.get_self_format();
@@ -1156,6 +1161,7 @@ impl EvtChatServerInner {
 	}
 
 	pub fn close(&mut self) {
+		debug_trace!("EvtChatServerInner close {:p}",self);
 		self.close_event_inner();
 		assert!(self.evmain == std::ptr::null_mut::<EvtMain>());
 		assert!(self.accsocks.len() == 0);
@@ -1209,9 +1215,7 @@ impl EvtChatServer {
 	}
 
 	pub fn close(&mut self) {
-		debug_trace!("borrow_mut for close {:p}",self);
-		self.inner.borrow_mut().close();
-		debug_trace!("free_mut for close {:p}",self);
+		debug_trace!("EvtChatServer close {:p}",self);
 		return;
 	}
 }
