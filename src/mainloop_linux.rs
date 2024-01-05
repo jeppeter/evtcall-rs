@@ -4,6 +4,7 @@ use crate::consts::*;
 use crate::interface::*;
 use crate::timeop::*;
 use std::sync::Arc;
+use std::cell::RefCell;
 use std::error::Error;
 use std::collections::HashMap;
 //use libc::{clock_gettime,CLOCK_MONOTONIC_COARSE,timespec,c_int};
@@ -15,16 +16,17 @@ use super::logger::*;
 
 evtcall_error_class!{MainLoopLinuxError}
 
+const MAX_EVT_NUM :usize = 4;
 
 #[derive(Clone)]
 struct EvtCallLinux {
-	evt :Arc<*mut dyn EvtCall>,
+	evt :Arc<RefCell<dyn EvtCall>>,
 	evthd : u64,
 	evttype : u32,
 }
 
 impl EvtCallLinux {
-	fn new(av :Arc<* mut dyn EvtCall>,evthd : u64,evttype :u32) -> Result<Self,Box<dyn Error>> {
+	fn new(av :Arc<RefCell<dyn EvtCall>>,evthd : u64,evttype :u32) -> Result<Self,Box<dyn Error>> {
 		Ok(Self{
 			evt : av,
 			evthd : evthd,
@@ -35,16 +37,16 @@ impl EvtCallLinux {
 
 #[derive(Clone)]
 struct EvtTimerLinux {
-	timer :Arc<*mut dyn EvtTimer>,
+	timer :Arc<RefCell< dyn EvtTimer>>,
 	startticks :u64,
 	interval : i32,
 	conti :bool,
 }
 
 impl EvtTimerLinux {
-	fn new(av :Arc<* mut dyn EvtTimer>, interval : i32,conti :bool) -> Result<Self,Box<dyn Error>> {
+	fn new(av :Arc<RefCell<dyn EvtTimer>>, interval : i32,conti :bool) -> Result<Self,Box<dyn Error>> {
 		Ok(Self {
-			timer : av,
+			timer : av.clone(),
 			interval : interval,
 			conti : conti,
 			startticks : get_cur_ticks(),
@@ -105,14 +107,14 @@ impl EvtMain {
 		Ok(retv)
 	}
 
-	pub fn add_timer(&mut self,bv :Arc<*mut dyn EvtTimer>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
+	pub fn add_timer(&mut self,bv :Arc<RefCell<dyn EvtTimer>>,interval:i32,conti:bool) -> Result<u64,Box<dyn Error>> {
 		self.guid += 1;
 		let ntimer :EvtTimerLinux = EvtTimerLinux::new(bv,interval,conti)?;
 		self.timermaps.insert(self.guid,ntimer);
 		Ok(self.guid)
 	}
 
-	pub fn add_event(&mut self,bv :Arc<*mut dyn EvtCall>,evthd :u64, evttype :u32) -> Result<(),Box<dyn Error>> {
+	pub fn add_event(&mut self,bv :Arc<RefCell<dyn EvtCall>>,evthd :u64, evttype :u32) -> Result<(),Box<dyn Error>> {
 		unsafe {
 			let mut optype :u32 = 0;
 			if (evttype & READ_EVENT) != 0 {
@@ -281,11 +283,14 @@ impl EvtMain {
 
 	#[allow(unused_variables)]
 	pub fn main_loop(&mut self) -> Result<(),Box<dyn Error>> {
-		let mut evts :Vec<libc::epoll_event> = Vec::with_capacity(4);
+		let mut evts :Vec<libc::epoll_event> = Vec::with_capacity(MAX_EVT_NUM);
 		let mut retv :i32;
 		let mut evtguids :Vec<u64>;
 		let mut evttypes :Vec<u32>;
-		let mut timerguids :Vec<u64>;		
+		let mut timerguids :Vec<u64>;
+		unsafe {
+			evts.set_len(MAX_EVT_NUM);
+		}
 		while self.exited == 0 {
 			/*max 30 second*/
 			let maxtime = self.get_time(30000);
@@ -293,7 +298,7 @@ impl EvtMain {
 			let mut idx :usize;
 			let mut guid :u64;
 			unsafe {
-				reti = libc::epoll_wait(self.epollfd,  evts.as_ptr() as *mut libc::epoll_event,evts.capacity() as i32,maxtime as c_int);
+				reti = libc::epoll_wait(self.epollfd,  evts.as_ptr() as *mut libc::epoll_event,evts.len() as i32,maxtime as c_int);
 			}
 
 			evtguids = Vec::new();
@@ -304,7 +309,6 @@ impl EvtMain {
 					evts[idx].u64 = 0;
 					idx += 1;
 				}
-
 				(evtguids,evttypes) = self.get_evts_guids(&evts);
 			}
 
@@ -313,7 +317,7 @@ impl EvtMain {
 			idx = 0;
 			while idx < evtguids.len() {
 				guid = evtguids[idx];
-				let mut findvk :Option<Arc<* mut dyn EvtCall>> = None;
+				let mut findvk :Option<Arc<RefCell<dyn EvtCall>>> = None;
 				let mut evthd :u64 = INVALID_EVENT_HANDLE;
 				match self.evtmaps.get(&guid) {
 					Some(ev) => {
@@ -326,15 +330,10 @@ impl EvtMain {
 				}
 
 				if findvk.is_some() {
-					let c :Arc<* mut dyn EvtCall> = findvk.unwrap();
-					let b = Arc::as_ptr(&c);
+					let c :Arc<RefCell<dyn EvtCall>> = findvk.unwrap();
 					let evttype :u32;
-
 					evttype = evttypes[idx];
-
-					unsafe {
-						(&mut (*(*b))).handle(evthd,evttype,self)?;
-					}
+					c.borrow_mut().handle(evthd,evttype,self)?;
 				}
 
 				idx += 1;
@@ -355,11 +354,9 @@ impl EvtMain {
 
 				if findtv.is_some() {
 					let c :EvtTimerLinux = findtv.unwrap();
-					let b = Arc::as_ptr(&(c.timer));
-					unsafe {
-						(&mut (*(*b))).timer(guid,self)?;
-					}
+					let b = c.timer.clone();
 
+					b.borrow_mut().timer(guid,self)?;
 
 					if !c.conti {
 						self.timermaps.remove(&guid);
@@ -373,7 +370,6 @@ impl EvtMain {
 						}
 					}
 				}
-
 				idx += 1;
 			}
 
@@ -408,12 +404,10 @@ impl EvtMain {
 
 			if findev.is_some() {
 				let c = findev.unwrap();
-				let b = Arc::as_ptr(&c.evt);
+				let b = c.evt.clone();
 				let evttype :u32 = c.evttype;
 				let hd :u64 = c.evthd;
-				unsafe {
-					(&mut (*(*b))).close_event(hd,evttype,self);
-				}
+				b.borrow_mut().close_event(hd,evttype,self);
 			}
 			idx += 1;
 		}
@@ -434,10 +428,8 @@ impl EvtMain {
 
 			if findtv.is_some() {
 				let c = findtv.unwrap();
-				let b = Arc::as_ptr(&c.timer);
-				unsafe {
-					(&mut (*(*b))).close_timer(*g,self);	
-				}
+				let b = c.timer.clone();
+				b.borrow_mut().close_timer(*g,self);
 			}
 		}
 
