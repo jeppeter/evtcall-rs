@@ -342,50 +342,56 @@ impl EvtChatClientInner {
 
 	pub fn handle(&mut self, evthd :u64, evttype :u32,evtmain :&mut EvtMain,parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
 		if evthd == self.sockfd && (evttype & READ_EVENT) != 0 {
-			if !self.inrd {
-				let completed = self.sock.complete_connect()?;
-				if completed > 0 {
+
+			if (evttype & READ_EVENT) != 0 {
+				if !self.inrd {
+					let completed = self.sock.complete_connect()?;
+					if completed > 0 {
+						evtmain.remove_event(self.sockfd);
+						self.insertsock = false;
+						evtmain.remove_timer(self.connguid);
+						self.insertconntimeout = false;
+						self.__inner_sock_read(parent.clone())?
+						self.__inner_stdin_read(parent.clone())?;
+					}
+				} else {				
+					let completed = self.sock.complete_read()?;
+					if completed > 0 {
+						evtmain.remove_event(self.sockfd);
+						self.insertsock = false;
+						self.__inner_sock_read(parent.clone())?;
+					}
+				}
+				assert!(self.insertsock);
+
+			}  
+			if (evttype & WRITE_EVENT) != 0 {
+				let completed = self.sock.complete_write()?;
+				if completed > 0  {
 					evtmain.remove_event(self.sockfd);
 					self.insertsock = false;
-					evtmain.remove_timer(self.connguid);
-					self.insertconntimeout = false;
-					self.__inner_sock_read(parent.clone())?
-					self.__inner_stdin_read(parent.clone())?;
+					self.wbuf = Vec::new();
+					self.__inner_sock_write(parent.clone())?;
+					if !self.insertsock && self.evttype != 0 {
+						self.sockfd = self.sock.get_sock_real();
+						evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;
+					}
 				}
-			} else {				
-				let completed = self.sock.complete_read()?;
-				if completed > 0 {
-					evtmain.remove_event(self.sockfd);
-					self.insertsock = false;
-					self.__inner_sock_read(parent.clone())?;
-				}
+				assert!(self.insertsock);
 			}
-			assert!(self.insertsock);
+		} else if evthd == self.stdinfd {
+			if (evttype & READ_EVENT ) != 0 {
+				self.__inner_stdin_read(parent.clone())?;
+			}
+		} else if evthd == self.exithd {
+			evtmain.break_up()?;
 		}
 
-		if evthd == self.sockfd && (evttype & WRITE_EVENT) != 0 {
-			let completed = self.sock.complete_write()?;
-			if completed > 0  {
-				evtmain.remove_event(self.sockfd);
-				self.insertsock = false;
-				self.wbuf = Vec::new();
-				self.__inner_sock_write(parent.clone())?;
-				if !self.insertsock && self.evttype != 0 {
-					self.sockfd = self.sock.get_sock_real();
-					evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;
-				}
-			}
-			assert!(self.insertsock);
-		}
-
-		if evthd == self.stdinfd && (evttype & READ_EVENT) != 0 {
-			self.__inner_stdin_read(parent.clone())?;
-		}
 
 		Ok(())
 	}
 
-	pub fn close_event(&mut self)  {
+	fn __close_event_inner(&mut self)  {
 		if self.insertsock {
 			(*self.evmain).remove_event(self.sockfd);
 			self.insertsock = false;
@@ -404,7 +410,7 @@ impl EvtChatClientInner {
 		return;
 	}
 
-	pub fn close_timer(&mut self) {
+	fn __close_timer_inner(&mut self) {
 		if self.insertconntimeout {
 			(*self.evmain).remove_timer(self.connguid);
 			self.insertconntimeout = false;
@@ -415,8 +421,8 @@ impl EvtChatClientInner {
 
 
 	pub fn close(&mut self)  {
-		self.close_event();
-		self.close_timer();
+		self.__close_event_inner();
+		self.__close_timer_inner();
 
 		assert!(!self.insertconntimeout);
 		assert!(!self.insertsock);
@@ -442,6 +448,15 @@ impl EvtChatClientInner {
 	pub fn debug_mode(&mut self,_fname :&str, _lineno :u32) {
 		return;
 	}
+
+	pub fn close_event(&mut self,_evthd :u64, _evttype :u32,_evtmain :&mut EvtMain) {
+		self.__close_event_inner();
+	}
+
+	pub fn close_timer(&mut self,, _guid :u64, _evtmain :&mut EvtMain) {
+		self.__close_timer_inner();
+	}
+
 }
 
 impl EvtCall for EvtChatClient {
