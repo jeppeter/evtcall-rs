@@ -77,13 +77,27 @@ impl StdinRd {
 struct EvtChatClientInner {
 	sock :TcpSockHandle,
 	stdinrd :StdinRd,
+	stdinfd :u64,
+	sockfd :u64,
+	exithd : u64,
 	evttype :u32,
 	insertsock : bool,
-	exithd : u64,
 	insertexit : bool,
+	insertstdin : bool,
+	insertconntimeout : bool,
+	connguid : u64,
 	rdbuf :Vec<u8>,
 	rdsidx : usize,
 	rdeidx : usize,
+	rdlen : usize,
+
+	stdinrdbuf :Vec<u8>,
+	stdinrdsidx : usize,
+	stdinrdeidx : usize,
+	stdinrdlen : usize,
+
+	wbuf : Vec<u8>,
+	wbufs :Vec<Vec<u8>>,
 }
 
 struct EvtChatClient {
@@ -184,6 +198,7 @@ impl EvtChatClientInner {
 			}
 			self.insertsock = true;
 		}
+		self.inrd = true;
 
 		Ok(())
 	}
@@ -249,7 +264,7 @@ impl EvtChatClientInner {
 		return Ok(());
 	}
 
-	pub fn connect_client_after(&mut self,ipaddr :&str, port :u32,_timemills :i32, exithd :u64, _evtmain :&mut EvtMain,parent :EvtChatClient) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+	pub fn connect_client_after(&mut self,timemills :i32,  parent :EvtChatClient) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
 		unsafe {
 			self.rdbuf.set_len(RDBUF_SIZE);
 			self.stdinrdbuf.set_len(RDBUF_SIZE);
@@ -257,29 +272,55 @@ impl EvtChatClientInner {
 		if self.sock.is_connect_mode() {
 			self.evttype = READ_EVENT;
 			self.sockfd = self.sock.get_sock_real();
-			_evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;
+			unsafe {
+				(*self.evmain).add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;	
+			}
+			
 			self.insertsock = true;
+
+			unsafe {
+				self.connguid =(*self.evmain).add_timer(Arc::new(RefCell::new(parent.clone())),timemills,false)?;	
+			}
+			
+			self.insertconntimeout = true;
 		} else {
 			self.__inner_sock_read(parent.clone())?;
 			self.__inner_stdin_read(parent.clone())?;
 		}
 
-		_evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.exithd,READ_EVENT)?;
-		self.insertexit = true;
+		if !self.insertexit {
+			unsafe {
+				(*self.evmain).add_event(Arc::new(RefCell::new(parent.clone())),self.exithd,READ_EVENT)?;	
+			}			
+			self.insertexit = true;
+		}
 		Ok(())
 	}
 
 	pub fn connect_client(ipaddr :&str, port :u32,_timemills :i32, exithd :u64, _evtmain :&mut EvtMain) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {	
 		let reti :Self = Self {
 			sock : TcpSockHandle::connect_client(ipaddr,port,"",0,false)?,
+			sockfd : INVALID_EVENT_HANDLE,
+			stdinfd : INVALID_EVENT_HANDLE,
+			inrd : false,
 			evttype : 0,
 			insertsock : false,
 			exithd : exithd,
 			insertexit : false,
+			connguid : 0,
+			insertconntimeout : false,
 			rdbuf : Vec::new(),
 			rdsidx : 0,
 			rdeidx : 0,
 			rdlen : 0,
+
+			stdinrdbuf : Vec::new(),
+			stdinrdsidx : 0,
+			stdinrdeidx : 0,
+			stdinrdlen : 0,
+
+			wbuf : Vec::new(),
+			wbufs : Vec::new(),
 		};
 		let retv = Arc::new(RefCell::new(reti));
 		Ok(retv)
@@ -301,12 +342,25 @@ impl EvtChatClientInner {
 
 	pub fn handle(&mut self, evthd :u64, evttype :u32,evtmain :&mut EvtMain,parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
 		if evthd == self.sockfd && (evttype & READ_EVENT) != 0 {
-			let completed = self.sock.complete_read()?;
-			if completed > 0 {
-				evtmain.remove_event(self.sockfd);
-				self.insertsock = false;
-				self.__inner_sock_read(parent.clone())?;
+			if !self.inrd {
+				let completed = self.sock.complete_connect()?;
+				if completed > 0 {
+					evtmain.remove_event(self.sockfd);
+					self.insertsock = false;
+					evtmain.remove_timer(self.connguid);
+					self.insertconntimeout = false;
+					self.__inner_sock_read(parent.clone())?
+					self.__inner_stdin_read(parent.clone())?;
+				}
+			} else {				
+				let completed = self.sock.complete_read()?;
+				if completed > 0 {
+					evtmain.remove_event(self.sockfd);
+					self.insertsock = false;
+					self.__inner_sock_read(parent.clone())?;
+				}
 			}
+			assert!(self.insertsock);
 		}
 
 		if evthd == self.sockfd && (evttype & WRITE_EVENT) != 0 {
@@ -321,6 +375,7 @@ impl EvtChatClientInner {
 					evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;
 				}
 			}
+			assert!(self.insertsock);
 		}
 
 		if evthd == self.stdinfd && (evttype & READ_EVENT) != 0 {
@@ -330,17 +385,105 @@ impl EvtChatClientInner {
 		Ok(())
 	}
 
-
-	pub fn write_sock_handle(&mut self,evthd :u64 ,evttype :u32, evtmain :&mut EvtMain,parent : EvtChatClient) -> Result<(),Box<dyn Error>> {
-		if self.sock.is_write_mode() {
-			let completed = self.sock.complete_write()?;
-			if completed == 0 {
-				return Ok(());
-			}
-			evtmain.remove_event(self.sockfd)?;
+	pub fn close_event(&mut self)  {
+		if self.insertsock {
+			(*self.evmain).remove_event(self.sockfd);
 			self.insertsock = false;
-
-
 		}
+
+		if self.insertstdinrd {
+			(*self.evmain).remove_event(self.stdinfd);
+			self.insertstdinrd = false;
+		}
+
+		if self.insertexit {
+			(*self.evmain).remove_event(self.exithd);
+			self.insertexit = false;
+		}
+
+		return;
+	}
+
+	pub fn close_timer(&mut self) {
+		if self.insertconntimeout {
+			(*self.evmain).remove_timer(self.connguid);
+			self.insertconntimeout = false;
+		}
+		return ;
+	}
+
+
+
+	pub fn close(&mut self)  {
+		self.close_event();
+		self.close_timer();
+
+		assert!(!self.insertconntimeout);
+		assert!(!self.insertsock);
+		assert!(!self.insertexit);
+		assert!(!self.insertstdinrd);
+		self.sock.close();
+
+		self.rdsidx = 0;
+		self.rdeidx = 0;
+		self.rdlen = 0;
+		self.rdbuf = Vec::new();
+
+		self.stdinrdsidx = 0;
+		self.stdinrdeidx = 0;
+		self.stdinrdlen = 0;
+		self.stdinrdbuf = Vec::new();
+
+
+		self.wbuf = Vec::new();
+		self.wbufs = Vec::new();
+	}
+
+	pub fn debug_mode(&mut self,_fname :&str, _lineno :u32) {
+		return;
+	}
+}
+
+impl EvtCall for EvtChatClient {
+	fn debug_mode(&mut self,fname :&str, lineno :u32) {
+		return self.inner.borrow_mut().debug_mode(fname,lineno,self.clone());
+	}
+
+	fn handle(&mut self,evthd :u64, evttype :u32,evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+		let p :EvtChatClient = self.clone();
+		return self.inner.borrow_mut().handle(evthd,evttype,evtmain,p);
+	}
+
+	fn close_event(&mut self,evthd :u64, evttype :u32,evtmain :&mut EvtMain) {
+		let p :EvtChatClient = self.clone();
+		return self.inner.borrow_mut().close_event();
+	}
+}
+
+impl EvtTimer for EvtChatClient {
+	fn timer(&mut self,_timerguid :u64,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+		let p :EvtChatClient = self.clone();
+		return self.inner.borrow_mut().timer(_timerguid,_evtmain,p);
+	}
+
+	fn close_timer(&mut self, _guid :u64, _evtmain :&mut EvtMain) {
+		let p :EvtChatClient = self.clone();
+		return self.inner.borrow_mut().close_timer();
+	}
+}
+
+impl EvtChatClient {
+	pub fn connect_client(ipaddr :&str, port :u32,timemills :i32, exithd :u64, evtmain :&mut EvtMain) -> Result<Self,Box<dyn Error>> {	
+		let ninner :Arc<RefCell<EvtChatClientInner>> = EvtChatClientInner::connect_client(ipaddr,port,exithd,evtmain)?;
+		let retv :Self = Self {
+			inner :ninner,
+		};
+		retv.inner.borrow_mut().connect_client_after(timemills,retv.clone())?;
+		Ok(retv)
+	}
+
+	pub fn close(&mut self) {
+		/*we do not close this*/
+		debug_trace!("EvtChatClient close {:p}",self);
 	}
 }
