@@ -502,3 +502,54 @@ impl EvtChatClient {
 		debug_trace!("EvtChatClient close {:p}",self);
 	}
 }
+
+
+struct EvtChatServerInner {
+	sock :TcpSockHandle,
+	sockfd : u64,
+	insertsock : bool,
+	insertexit : bool,
+	evttype : u32,
+
+	accsocks : Vec<EvtChatServerConn>,
+	evmain :*mut EvtMain,
+}
+
+struct EvtChatServer {
+	inner : Arc<RefCell<EvtChatServerInner>>,
+}
+
+impl Drop for EvtChatServerInner {
+	fn drop(&mut self) {
+		self.close();
+	}
+}
+
+impl EvtChatServerInner {
+	pub (crate) fn bind_server(ipaddr :&str, port :u32,backlog :i32,exithd :u64, evtmain :*mut EvtMain) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+		let iretv :Self = Self {
+			sock : TcpSockHandle::bind_server(ipaddr,port,backlog)?,
+			evmain : evtmain,
+			accsocks : Vec::new(),
+			exithd : exithd,
+			insertexit : false,
+			insertsock : false,
+			evttype : 0,
+			sockfd  : INVALID_EVENT_HANDLE,
+		};
+		let retv = Arc::new(RefCell::new(iretv));
+		Ok(retv)
+	}
+
+	fn _accept_inner(&mut self, parent : EvtChatServer) -> Result<(),Box<dyn Error>> {
+		
+	}
+
+	pub (crate) fn bind_server_after(&mut self,parent :EvtChatServer) -> Result<(),Box<dyn Error>> {
+		if self.sock.is_accept_mode() {
+
+		} else {
+
+		}
+	}
+}
