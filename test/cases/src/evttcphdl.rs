@@ -42,7 +42,7 @@ extargs_error_class!{EvtChatError}
 include!("evtchat_windows.rs");
 
 #[cfg(target_os = "linux")]
-include!("evtchat_linux.rs")
+include!("evtchat_linux.rs");
 
 
 const  DEFAULT_EVCHAT_IPADDR :&str = "127.0.0.1";
