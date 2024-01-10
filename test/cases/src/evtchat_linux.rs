@@ -20,7 +20,6 @@ macro_rules! get_errno {
 
 struct StdinRd {
 	rd :i32,
-	inrd : bool,
 }
 
 impl Drop for StdinRd {
@@ -45,9 +44,6 @@ impl StdinRd {
 	pub fn read(&mut self, rdptr :*mut u8)  -> Result<i32,Box<dyn Error>> {
 		let reti :i32;
 
-		if self.inrd {
-			extargs_new_error!{EvtChatError,"inrd mode"}
-		}
 
 		unsafe {
 			reti = libc::read(self.rd,rdptr,1);
@@ -63,9 +59,6 @@ impl StdinRd {
 		Ok(1)
 	}
 
-	pub fn is_read_mode(&self) -> bool {
-		return self.inrd;
-	}
 
 
 	pub fn close(&mut self) {
@@ -81,6 +74,9 @@ struct EvtChatClientInner {
 	sockfd :u64,
 	exithd : u64,
 	evttype :u32,
+	inrd :bool,
+	inwr :bool,
+	inconn :bool,
 	insertsock : bool,
 	insertexit : bool,
 	insertstdin : bool,
@@ -145,20 +141,18 @@ impl EvtChatClientInner {
 	}
 
 	fn __inner_stdin_read(&mut self,parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
-		if !self.stdinrd.is_read_mode() {
-			loop {
-				if self.stdinrdlen == self.stdinrdbuf.len() {
-					self.__inner_sock_write(parent.clone())?;
-				}
-
-				let completed = self.stdinrd.read(&self.stdinrdbuf[self.stdinrdeidx])?;
-				if completed == 0 {
-					break;
-				}
-				self.stdinrdeidx += 1;
-				self.stdinrdeidx %= self.stdinrdbuf.len();
-				self.stdinrdlen += 1;
+		loop {
+			if self.stdinrdlen == self.stdinrdbuf.len() {
+				self.__inner_sock_write(parent.clone())?;
 			}
+
+			let completed = self.stdinrd.read(&self.stdinrdbuf[self.stdinrdeidx])?;
+			if completed == 0 {
+				break;
+			}
+			self.stdinrdeidx += 1;
+			self.stdinrdeidx %= self.stdinrdbuf.len();
+			self.stdinrdlen += 1;
 		}
 
 		if !self.insertstdinrd {
@@ -171,8 +165,75 @@ impl EvtChatClientInner {
 		Ok(())
 	}	
 
-	fn __inner_sock_read(&mut self,parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
-		if !self.insertsock {
+	fn __insert_sock(&mut self,parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
+		let mut willinsert :bool =false;
+		let mut willremove :bool =false;
+
+		if self.inrd || self.inwr || self.inconn {
+			if !self.insertsock {
+				willinsert = true;
+			}
+
+			if (self.inrd  || self.inconn ) && (self.evttype & READ_EVENT) == 0 {
+				willinsert = true;
+			}
+
+			if self.inwr && (self.evttype & WRITE_EVENT) == 0{
+				willinsert = true;
+			}
+
+			if (!self.inrd && !self.inconn )&& (self.evttype & READ_EVENT) != 0 {
+				willinsert = true;
+			}
+
+			if !self.inwr && (self.evttype & WRITE_EVENT) != 0 {
+				willinsert = true;
+			}
+		}
+
+		if !self.inrd && !self.inwr {
+			willremove = true;
+		}
+
+		if willinsert {
+			if self.insertsock {
+				assert!(self.sockfd != INVALID_EVENT_HANDLE);
+				unsafe {
+					(*self.evmain).remove_event(self.sockfd);
+				}
+				self.insertsock = false;
+			}
+
+			self.evttype = 0;
+			if self.inrd || self.inconn {
+				self.evttype |= READ_EVENT;
+			}
+			if self.inwr {
+				self.evttype |= WRITE_EVENT;
+			}
+
+			self.sockfd = self.sock.get_sock_real();
+			unsafe {
+				(*self.evmain).add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;
+			}
+			self.insertsock = true;
+		}
+
+		if willremove {
+			self.evttype = 0;			
+			if self.insertsock {
+				assert!(self.sockfd != INVALID_EVENT_HANDLE);
+				unsafe {
+					(*self.evmain).remove_event(self.sockfd);
+				}
+				self.insertsock = false;
+			}
+		}
+		Ok(())
+	}
+
+	fn __inner_sock_read(&mut self) -> Result<(),Box<dyn Error>> {
+		if !self.inrd {
 			loop {
 				if self.rdlen == self.rdbuf.len() {
 					self.__write_stdout()?;
@@ -180,6 +241,7 @@ impl EvtChatClientInner {
 
 				let completed = self.sock.read(&mut self.rdbuf[self.rdeidx],1)?;
 				if completed == 0 {
+					self.inrd = true;
 					self.__write_stdout()?;
 					break;
 				}
@@ -189,16 +251,6 @@ impl EvtChatClientInner {
 				self.rdlen += 1;
 			}
 		}
-
-		if !self.insertsock {
-			self.evttype |= READ_EVENT;
-			self.sockfd = self.sock.get_sock_real();
-			unsafe {
-				(*self.evmain).add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;
-			}
-			self.insertsock = true;
-		}
-		self.inrd = true;
 
 		Ok(())
 	}
@@ -223,17 +275,16 @@ impl EvtChatClientInner {
 			self.wbufs.push(wbuf);
 		}
 
-		return self.__inner_sock_write(parent);
+		return self.__inner_sock_write();
 	}
 
-	fn __inner_sock_write(&mut self,parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
-
-		if !self.insertsock && (self.evttype & WRITE_EVENT) == 0 {
+	fn __inner_sock_write(&mut self) -> Result<(),Box<dyn Error>> {
+		if !self.inwr {
 			loop {
 				if self.wbuf.len() > 0 {
 					let completed = self.sock.write(self.wbuf.as_mut_ptr(),self.wbuf.len())?;
 					if completed == 0 {
-						self.evttype |= WRITE_EVENT;
+						self.inwr = true;
 						break;
 					}
 					self.wbuf = Vec::new();
@@ -244,21 +295,13 @@ impl EvtChatClientInner {
 					self.wbufs.remove(0);
 				}
 
-				if self.wbuf.len() == 0 && self.wbufs.len() == 0 {
-					self.evttype &= ~WRITE_EVENT;
+				if self.wbuf.len() == 0 {
+					self.inwr = false;
 					break;
 				}	
 
 				/*now to continue*/
 			}
-		}
-
-		if !self.insertsock && self.wbuf.len() > 0 {
-			self.sockfd = self.sock.get_sock_real();
-			unsafe {
-				(*self.evmain).add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;
-			}
-			self.insertsock = true;
 		}
 
 		return Ok(());
@@ -270,28 +313,23 @@ impl EvtChatClientInner {
 			self.stdinrdbuf.set_len(RDBUF_SIZE);
 		}
 		if self.sock.is_connect_mode() {
-			self.evttype = READ_EVENT;
-			self.sockfd = self.sock.get_sock_real();
-			unsafe {
-				(*self.evmain).add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;	
-			}
-			
-			self.insertsock = true;
-
+			self.inconn = true;
 			unsafe {
 				self.connguid =(*self.evmain).add_timer(Arc::new(RefCell::new(parent.clone())),timemills,false)?;	
 			}
 			
 			self.insertconntimeout = true;
 		} else {
-			self.__inner_sock_read(parent.clone())?;
+			self.__inner_sock_read()?;
 			self.__inner_stdin_read(parent.clone())?;
 		}
+
+		self.__insert_sock(parent.clone())?;
 
 		if !self.insertexit {
 			unsafe {
 				(*self.evmain).add_event(Arc::new(RefCell::new(parent.clone())),self.exithd,READ_EVENT)?;	
-			}			
+			}
 			self.insertexit = true;
 		}
 		Ok(())
@@ -303,6 +341,8 @@ impl EvtChatClientInner {
 			sockfd : INVALID_EVENT_HANDLE,
 			stdinfd : INVALID_EVENT_HANDLE,
 			inrd : false,
+			inwr :false,
+			inconn : false,
 			evttype : 0,
 			insertsock : false,
 			exithd : exithd,
@@ -326,59 +366,43 @@ impl EvtChatClientInner {
 		Ok(retv)
 	}
 
-	pub fn read_sock_handle(&mut self,evthd :u64 ,evttype :u32, evtmain :&mut EvtMain,parent : EvtChatClient) -> Result<(),Box<dyn Error>> {
-		if self.sock.is_read_mode() {
-			let completed = self.sock.complete_read()?;
-			if completed == 0 {
-				return Ok(());
-			}
-			evtmain.remove_event(self.sockfd)?;
-			self.insertsock = false;
-
-			self.__inner_read(parent.clone())?;
-		}
-		Ok(())
+	pub (crate) fn timer(&mut self, guid :u64, parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
+		extargs_new_error!{EvtChatError,"connect {} timeout",self.sock.get_peer_format()}
 	}
 
-	pub fn handle(&mut self, evthd :u64, evttype :u32,evtmain :&mut EvtMain,parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
-		if evthd == self.sockfd && (evttype & READ_EVENT) != 0 {
-
+	pub (crate) fn handle(&mut self, evthd :u64, evttype :u32,evtmain :&mut EvtMain,parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
+		if evthd == self.sockfd {
 			if (evttype & READ_EVENT) != 0 {
-				if !self.inrd {
+				if self.inconn {
 					let completed = self.sock.complete_connect()?;
 					if completed > 0 {
-						evtmain.remove_event(self.sockfd);
-						self.insertsock = false;
-						evtmain.remove_timer(self.connguid);
-						self.insertconntimeout = false;
-						self.__inner_sock_read(parent.clone())?
-						self.__inner_stdin_read(parent.clone())?;
+						self.inconn = false;
+						if self.insertconntimeout {
+							/*to remove connect timer*/
+							evmain.remove_timer(self.connguid);
+							self.insertconntimeout = false;
+						}
+						self.__inner_sock_read()?;
 					}
-				} else {				
+				} else if self.inrd {				
 					let completed = self.sock.complete_read()?;
 					if completed > 0 {
-						evtmain.remove_event(self.sockfd);
-						self.insertsock = false;
-						self.__inner_sock_read(parent.clone())?;
+						self.inrd = false;
+						self.__inner_sock_read()?;
 					}
+				} else {
+					debug_trace!("not in right mode for READ_EVENT");
 				}
-				assert!(self.insertsock);
-
 			}  
 			if (evttype & WRITE_EVENT) != 0 {
 				let completed = self.sock.complete_write()?;
 				if completed > 0  {
-					evtmain.remove_event(self.sockfd);
-					self.insertsock = false;
-					self.wbuf = Vec::new();
-					self.__inner_sock_write(parent.clone())?;
-					if !self.insertsock && self.evttype != 0 {
-						self.sockfd = self.sock.get_sock_real();
-						evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.sockfd,self.evttype)?;
-					}
+					self.inwr = false;
+					self.__inner_sock_write()?;
 				}
-				assert!(self.insertsock);
 			}
+			/*to insert socket for last*/
+			self.__insert_sock(parent.clone())?;
 		} else if evthd == self.stdinfd {
 			if (evttype & READ_EVENT ) != 0 {
 				self.__inner_stdin_read(parent.clone())?;
@@ -386,7 +410,6 @@ impl EvtChatClientInner {
 		} else if evthd == self.exithd {
 			evtmain.break_up()?;
 		}
-
 
 		Ok(())
 	}
@@ -421,6 +444,7 @@ impl EvtChatClientInner {
 
 
 	pub fn close(&mut self)  {
+		debug_trace!("EvtChatClientInner close {:p}",self);
 		self.__close_event_inner();
 		self.__close_timer_inner();
 
@@ -429,6 +453,10 @@ impl EvtChatClientInner {
 		assert!(!self.insertexit);
 		assert!(!self.insertstdinrd);
 		self.sock.close();
+
+		self.inconn = false;
+		self.inrd = false;
+		self.inwr = false;
 
 		self.rdsidx = 0;
 		self.rdeidx = 0;
@@ -439,7 +467,6 @@ impl EvtChatClientInner {
 		self.stdinrdeidx = 0;
 		self.stdinrdlen = 0;
 		self.stdinrdbuf = Vec::new();
-
 
 		self.wbuf = Vec::new();
 		self.wbufs = Vec::new();
@@ -553,7 +580,7 @@ impl EvtChatServerConnInner {
 		Ok(())
 	}
 
-	fn _insert_sock(&mut self,parent :EvtChatServerConn) -> Result<(),Box<dyn Error>> {
+	fn __insert_sock(&mut self,parent :EvtChatServerConn) -> Result<(),Box<dyn Error>> {
 		let mut willinsert :bool =false;
 		let mut willremove :bool = false;
 		if self.inwr || self.inrd {
@@ -568,6 +595,15 @@ impl EvtChatServerConnInner {
 			if self.inrd && (self.evttype & READ_EVENT) == 0 {
 				willinsert = true;
 			}
+
+			if !self.inwr && (self.evttype & WRITE_EVENT) != 0 {
+				willinsert = true;
+			}
+
+			if !self.inrd && (self.evttype & READ_EVENT) != 0 {
+				willinsert = true;
+			}
+
 		}
 
 		if !self.inwr && !self.inrd {
@@ -583,6 +619,7 @@ impl EvtChatServerConnInner {
 				self.evttype |= WRITE_EVENT;
 			}
 			if self.insertsock {
+				assert!(self.sockfd != INVALID_EVENT_HANDLE);
 				unsafe {
 					(*self.evmain).remove_event(self.sockfd);
 				}
@@ -597,7 +634,9 @@ impl EvtChatServerConnInner {
 		}
 
 		if willremove {
+			self.evttype = 0;
 			if self.insertsock {
+				assert!(self.sockfd != INVALID_EVENT_HANDLE);
 				unsafe {
 					(*self.evmain).remove_event(self.sockfd);
 				}
@@ -619,6 +658,9 @@ impl EvtChatServerConnInner {
 			wbuf.push(self.rdbuf[cidx]);
 			idx += 1;
 		}
+
+		self.rdsidx = self.rdeidx;
+		self.rdlen = 0;
 
 		if wbuf.len() == 0 {
 			return Ok(());
@@ -659,8 +701,8 @@ impl EvtChatServerConnInner {
 		unsafe {
 			self.rdbuf.set_len(RDBUF_SIZE);
 		}
-		self._inner_read(parent.clone())?;
-		self._insert_sock(parent.clone())?;
+		self._inner_read()?;
+		self.__insert_sock(parent.clone())?;
 		Ok(())
 	}
 
@@ -685,24 +727,33 @@ impl EvtChatServerConnInner {
 
 	pub (crate) handle(&mut self, evthd :u64,evttype :u32,evtmain :&mut EvtMain,parent :EvtChatServerConn) -> Result<(),Box<dyn Error>> {
 		if evthd == self.sockfd && (evttype & READ_EVENT) != 0 {
-			let completed = self.sock.complete_read()?;
-			if completed > 0 {
-				self.inrd = false;
-				self._inner_read()?;
+			if self.inrd {
+				let completed = self.sock.complete_read()?;
+				if completed > 0 {
+					self.inrd = false;
+					self._inner_read()?;
+				}				
+			} else {
+				debug_trace!("not valid state in READ_EVENT {:p}",self);
 			}
 		}
 
 		if evthd == self.sockfd && (evttype & WRITE_EVENT) != 0 {
-			let completed = self.sock.complete_write()?;
-			if completed > 0 {
-				self.inwr = false;
-				self._inner_write()?;
+			if self.inwr {
+				let completed = self.sock.complete_write()?;
+				if completed > 0 {
+					self.inwr = false;
+					self._inner_write()?;
+				}				
+			} else {
+				debug_trace!("not valid state in WRITE_EVENT {:p}",self);
 			}
 		}
 
 		self._insert_sock(parent.clone())?;
 		Ok(())
 	}
+
 
 	fn __close_event_inner(&mut self) {
 		if self.insertsock {
@@ -720,10 +771,16 @@ impl EvtChatServerConnInner {
 
 	pub (crate) close(&mut self) {
 		self.__close_event_inner();
-		self.sockfd = self.sock.get_sock_real();
-		unsafe {
-			self.svr.remove_connection(self.sockfd);
-		}		
+		assert!(!self.insertsock);
+		if self.svr != std::ptr::null_mut::<EvtChatServerInner>() {
+			self.sockfd = self.sock.get_sock_real();
+			unsafe {
+				self.svr.remove_connection(self.sockfd);
+			}			
+		}
+		self.svr = std::ptr::null_mut::<EvtChatServerInner>();
+		self.evmain = std::ptr::null_mut::<EvtMain>();
+
 		self.sock.close();
 		self.rdbuf = Vec::new();
 		self.rdsidx = 0;
@@ -732,6 +789,10 @@ impl EvtChatServerConnInner {
 		self.wbuf = Vec::new();
 		self.wbufs = Vec::new();
 	}
+
+	pub (crate) fn get_sock_real(&self) -> u64 {
+		return self.sock.get_sock_real();
+	}
 }
 
 impl EvtChatServerConn {
@@ -739,10 +800,16 @@ impl EvtChatServerConn {
 		let ninner  = EvtChatServerInner::new(sock,svr,evmain)?;
 		let retv :Self = Self {
 			inner :ninner,
+			sockfd : 0,
 		};
 		let p :Self = retv.clone();
 		retv.inner.borrow_mut().new_after(retv)?;
+		retv.sockfd = retv.inner.borrow().get_sock_real();
 		Ok(retv)
+	}
+
+	pub (crate) fn get_sock_real() -> u64 {
+		return retv.sockfd;
 	}
 }
 
@@ -863,6 +930,7 @@ impl EvtChatServerInner {
 		if evthd == self.sockfd {
 			let completed = self.sock.complete_accept()?;
 			if completed {
+				assert!(self.sockfd != INVALID_EVENT_HANDLE);
 				evmain.remove_event(self.sockfd);
 				self.insertsock = false;
 				self._inner_accept()?;
