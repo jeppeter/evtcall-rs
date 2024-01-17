@@ -336,7 +336,7 @@ impl TcpSockHandleInner {
 		}
 
 		self._set_nonblock(self.sock)?;
-		if localip.len() > 0 && localport != 0 {
+		if localip.len() > 0 {
 			self.localaddr = format!("{}",localip);
 			self.localport = localport;
 			self._bind_addr(localip,localport)?;
@@ -347,12 +347,15 @@ impl TcpSockHandleInner {
 		unsafe {
 			let _eptr = (&mut error as *mut libc::c_int) as *mut libc::c_void;
 			let _elen = std::mem::size_of::<libc::c_int>() as u32;
+			evtcall_log_trace!("error {} _elen {}",error,_elen);
 			reti = libc::setsockopt(self.sock,libc::SOL_SOCKET,libc::SO_ERROR,_eptr,_elen);
 		}
 
 		if reti < 0 {
 			reti = get_errno!();
-			evtcall_new_error!{SockHandleError,"setsockopt SO_ERROR error {}",reti}
+			if reti != -libc::ENOPROTOOPT {
+				evtcall_new_error!{SockHandleError,"setsockopt SO_ERROR error {}",reti}	
+			}			
 		}
 
 		name = self._format_sockaddr_in(ipaddr,port)?;

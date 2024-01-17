@@ -139,7 +139,7 @@ impl EvtMain {
 				evtcall_new_error!{MainLoopLinuxError,"can not EPOLL_ADD error [{}]",retv}
 			}
 		}
-
+		evtcall_log_trace!("evthd 0x{:x} evttype 0x{:x}",evthd,evttype);
 		let ev = EvtCallLinux::new(bv,evthd,evttype)?;
 		self.guid += 1;
 		self.evtmaps.insert(self.guid,ev);
@@ -239,7 +239,7 @@ impl EvtMain {
 		let mut evtid :u64;
 		while idx < evts.len() {
 			evtid = evts[idx].u64 as u64;
-			if evtid > 0 {
+			if evtid != INVALID_EVENT_HANDLE {
 				match self.guidevtmaps.get(&evtid) {
 					Some(v) => {
 						match self.evtmaps.get(v) {
@@ -304,9 +304,10 @@ impl EvtMain {
 			evtguids = Vec::new();
 			evttypes = Vec::new();
 			if reti >= 0 {
+				evtcall_log_trace!("reti {}",reti);
 				idx = reti as usize;
 				while idx < evts.len() {
-					evts[idx].u64 = 0;
+					evts[idx].u64 = INVALID_EVENT_HANDLE;
 					idx += 1;
 				}
 				(evtguids,evttypes) = self.get_evts_guids(&evts);

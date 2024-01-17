@@ -20,6 +20,8 @@ macro_rules! get_errno {
 
 struct StdinRd {
 	rd :i32,
+	oldterm : libc::termios,
+	setted : bool,
 }
 
 impl Drop for StdinRd {
@@ -29,10 +31,62 @@ impl Drop for StdinRd {
 }
 
 impl StdinRd {
+
+	fn _set_raw(&mut self) -> Result<(),Box<dyn Error>> {
+		let mut reti :i32;
+		let mut i :usize;
+		let flags :i32;
+		unsafe {
+			flags = libc::fcntl(self.rd,libc::F_GETFL);
+			reti = libc::fcntl(self.rd,libc::F_SETFL,flags | libc::O_NONBLOCK);		
+		}
+		if reti < 0 {
+			reti = get_errno!();
+			extargs_new_error!{EvtChatError,"set stdin O_NONBLOCK error {}",reti}
+		}
+
+		unsafe {
+			let _rptr = &mut self.oldterm;
+			reti = libc::tcgetattr(self.rd,_rptr);
+		}
+		if reti < 0 {
+			reti = get_errno!();
+			extargs_new_error!{EvtChatError,"can not get oldterm {}",reti}
+		}
+		let mut newterm :libc::termios = unsafe {std::mem::zeroed()};
+		unsafe {
+			let _dstptr = &mut newterm as *mut libc::termios as *mut libc::c_void;
+			let _srcptr = &self.oldterm as *const libc::termios as *const libc::c_void;
+			libc::memcpy(_dstptr,_srcptr,std::mem::size_of::<libc::termios>());
+		}
+
+		newterm.c_lflag &= !(libc::ECHO | libc::ICANON);
+		unsafe {
+			let _rptr = &newterm;
+			reti = libc::tcsetattr(self.rd,libc::TCSAFLUSH,_rptr);
+		}
+		if reti < 0 {
+			reti = get_errno!();
+			extargs_new_error!{EvtChatError,"tcsetattr error {}",reti}
+		}
+		debug_buffer_trace!((&newterm as *const libc::termios),std::mem::size_of::<libc::termios>(),"set term");
+		i = 0;
+		while i < libc::NCCS {
+			debug_trace!("[{}]=[0x{:02x}]",i,newterm.c_cc[i]);
+			i += 1;
+		}
+		debug_trace!("c_ispeed 0x{:x} c_ospeed 0x{:x}",newterm.c_ispeed,newterm.c_ospeed);
+		self.setted = true;
+		Ok(())
+	}
+
 	pub fn new() -> Result<Self,Box<dyn Error>> {
-		let retv :Self = Self {
+		let mut retv :Self = Self {
 			rd : 0,
+			oldterm : unsafe {std::mem::zeroed()},
+			setted : false,
 		};
+		retv._set_raw()?;
 		Ok(retv)
 	}
 
@@ -44,6 +98,7 @@ impl StdinRd {
 		let mut reti :i32;
 
 
+		debug_trace!("stdin read before");
 		unsafe {
 			let _cptr :*mut libc::c_void = rdptr as *mut libc::c_void;
 			reti = libc::read(self.rd,_cptr,1) as i32;
@@ -55,6 +110,7 @@ impl StdinRd {
 			}
 			extargs_new_error!{EvtChatError,"can not read stdin error {}",reti}
 		}
+		debug_trace!("read {}",reti);
 		Ok(1)
 	}
 
@@ -62,6 +118,15 @@ impl StdinRd {
 
 	pub fn close(&mut self) {
 		debug_trace!("close StdinRd");
+		if self.setted {
+			unsafe {
+				let _rptr = &self.oldterm;
+				libc::tcsetattr(self.rd,libc::TCSAFLUSH,_rptr);
+			}
+			self.setted = false;
+		}
+
+
 		self.rd = -1;
 	}
 }
@@ -148,6 +213,7 @@ impl EvtChatClientInner {
 			}
 
 			let completed = self.stdinrd.read(&mut self.stdinrdbuf[self.stdinrdeidx])?;
+			debug_trace!("completed {}",completed);
 			if completed == 0 {
 				self.__stdin_write_sock()?;
 				break;
@@ -157,12 +223,14 @@ impl EvtChatClientInner {
 			self.stdinrdlen += 1;
 		}
 
+		debug_trace!("insertstdinrd {}",self.insertstdinrd);
 		if !self.insertstdinrd {
 			self.stdinfd = self.stdinrd.get_handle();
 			unsafe {
 				(*self.evmain).add_event(Arc::new(RefCell::new(parent.clone())),self.stdinfd,READ_EVENT)?;
 			}
 			self.insertstdinrd = true;
+			debug_trace!("stdinfd {}",self.stdinfd);
 		}
 		Ok(())
 	}	
@@ -176,24 +244,24 @@ impl EvtChatClientInner {
 				willinsert = true;
 			}
 
-			if (self.inrd  || self.inconn ) && (self.evttype & READ_EVENT) == 0 {
+			if self.inrd  && (self.evttype & READ_EVENT) == 0 {
 				willinsert = true;
 			}
 
-			if self.inwr && (self.evttype & WRITE_EVENT) == 0{
+			if (self.inwr || self.inconn  ) && (self.evttype & WRITE_EVENT) == 0{
 				willinsert = true;
 			}
 
-			if (!self.inrd && !self.inconn )&& (self.evttype & READ_EVENT) != 0 {
+			if (!self.inrd )&& (self.evttype & READ_EVENT) != 0 {
 				willinsert = true;
 			}
 
-			if !self.inwr && (self.evttype & WRITE_EVENT) != 0 {
+			if (!self.inwr && !self.inconn  )&& (self.evttype & WRITE_EVENT) != 0 {
 				willinsert = true;
 			}
 		}
 
-		if !self.inrd && !self.inwr {
+		if !self.inrd && !self.inwr && !self.inconn {
 			willremove = true;
 		}
 
@@ -207,10 +275,10 @@ impl EvtChatClientInner {
 			}
 
 			self.evttype = 0;
-			if self.inrd || self.inconn {
+			if self.inrd {
 				self.evttype |= READ_EVENT;
 			}
-			if self.inwr {
+			if self.inwr || self.inconn  {
 				self.evttype |= WRITE_EVENT;
 			}
 
@@ -229,7 +297,7 @@ impl EvtChatClientInner {
 					(*self.evmain).remove_event(self.sockfd);
 				}
 				self.insertsock = false;
-			}
+			}			
 		}
 		Ok(())
 	}
@@ -382,18 +450,7 @@ impl EvtChatClientInner {
 	pub (crate) fn handle(&mut self, evthd :u64, evttype :u32,evtmain :&mut EvtMain,parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
 		if evthd == self.sockfd {
 			if (evttype & READ_EVENT) != 0 {
-				if self.inconn {
-					let completed = self.sock.complete_connect()?;
-					if completed > 0 {
-						self.inconn = false;
-						if self.insertconntimeout {
-							/*to remove connect timer*/
-							evtmain.remove_timer(self.connguid);
-							self.insertconntimeout = false;
-						}
-						self.__inner_sock_read()?;
-					}
-				} else if self.inrd {				
+				if self.inrd {				
 					let completed = self.sock.complete_read()?;
 					if completed > 0 {
 						self.inrd = false;
@@ -404,10 +461,27 @@ impl EvtChatClientInner {
 				}
 			}  
 			if (evttype & WRITE_EVENT) != 0 {
-				let completed = self.sock.complete_write()?;
-				if completed > 0  {
-					self.inwr = false;
-					self.__inner_sock_write()?;
+				if self.inconn {
+					let completed = self.sock.complete_connect()?;
+					debug_trace!("connect complete {}",completed);
+					if completed > 0 {
+						self.inconn = false;
+						if self.insertconntimeout {
+							/*to remove connect timer*/
+							evtmain.remove_timer(self.connguid);
+							self.insertconntimeout = false;
+						}
+						self.__inner_sock_read()?;
+						self.__inner_stdin_read(parent.clone())?;
+					}
+				} else if self.inwr {
+					let completed = self.sock.complete_write()?;
+					if completed > 0  {
+						self.inwr = false;
+						self.__inner_sock_write()?;
+					}					
+				} else {
+					debug_trace!("not in right mode for WRITE_EVENT");
 				}
 			}
 			/*to insert socket for last*/
@@ -418,6 +492,8 @@ impl EvtChatClientInner {
 			}
 		} else if evthd == self.exithd {
 			evtmain.break_up()?;
+		} else {
+			extargs_new_error!{EvtChatError,"not valid evthd 0x{:x} evttype 0x{:x}",evthd,evttype}
 		}
 
 		Ok(())
