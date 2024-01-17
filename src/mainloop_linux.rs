@@ -334,9 +334,9 @@ impl EvtMain {
 					let c :Arc<RefCell<dyn EvtCall>> = findvk.unwrap();
 					let evttype :u32;
 					evttype = evttypes[idx];
+					evtcall_log_trace!("call handle evthd 0x{:x} evttype 0x{:x}",evthd,evttype);
 					c.borrow_mut().handle(evthd,evttype,self)?;
 				}
-
 				idx += 1;
 			}
 
@@ -357,6 +357,7 @@ impl EvtMain {
 					let c :EvtTimerLinux = findtv.unwrap();
 					let b = c.timer.clone();
 
+					evtcall_log_trace!("timer guid 0x{:x}",guid);
 					b.borrow_mut().timer(guid,self)?;
 
 					if !c.conti {

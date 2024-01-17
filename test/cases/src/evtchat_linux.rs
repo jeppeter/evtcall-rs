@@ -34,17 +34,7 @@ impl StdinRd {
 
 	fn _set_raw(&mut self) -> Result<(),Box<dyn Error>> {
 		let mut reti :i32;
-		let mut i :usize;
 		let flags :i32;
-		unsafe {
-			flags = libc::fcntl(self.rd,libc::F_GETFL);
-			reti = libc::fcntl(self.rd,libc::F_SETFL,flags | libc::O_NONBLOCK);		
-		}
-		if reti < 0 {
-			reti = get_errno!();
-			extargs_new_error!{EvtChatError,"set stdin O_NONBLOCK error {}",reti}
-		}
-
 		unsafe {
 			let _rptr = &mut self.oldterm;
 			reti = libc::tcgetattr(self.rd,_rptr);
@@ -70,12 +60,16 @@ impl StdinRd {
 			extargs_new_error!{EvtChatError,"tcsetattr error {}",reti}
 		}
 		debug_buffer_trace!((&newterm as *const libc::termios),std::mem::size_of::<libc::termios>(),"set term");
-		i = 0;
-		while i < libc::NCCS {
-			debug_trace!("[{}]=[0x{:02x}]",i,newterm.c_cc[i]);
-			i += 1;
+
+		unsafe {
+			flags = libc::fcntl(self.rd,libc::F_GETFL,0);
+			reti = libc::fcntl(self.rd,libc::F_SETFL,flags | libc::O_NONBLOCK);		
 		}
-		debug_trace!("c_ispeed 0x{:x} c_ospeed 0x{:x}",newterm.c_ispeed,newterm.c_ospeed);
+		if reti < 0 {
+			reti = get_errno!();
+			extargs_new_error!{EvtChatError,"set stdin O_NONBLOCK error {}",reti}
+		}
+
 		self.setted = true;
 		Ok(())
 	}
@@ -98,7 +92,7 @@ impl StdinRd {
 		let mut reti :i32;
 
 
-		debug_trace!("stdin read before");
+		debug_trace!("stdin read before {:p}",rdptr);
 		unsafe {
 			let _cptr :*mut libc::c_void = rdptr as *mut libc::c_void;
 			reti = libc::read(self.rd,_cptr,1) as i32;
@@ -185,6 +179,12 @@ impl EvtChatClientInner {
 		let mut wbuf :Vec<u8> = Vec::new();
 		let mut idx :usize = 0;
 		let mut cidx :usize;
+
+		debug_trace!("rdlen {}",self.rdlen);
+
+		if self.rdlen == 0 {
+			return Ok(());
+		}
 
 		while idx < self.rdlen {
 			cidx = self.rdsidx + idx;
@@ -382,10 +382,11 @@ impl EvtChatClientInner {
 	}
 
 	pub fn connect_client_after(&mut self,timemills :i32,  parent :EvtChatClient) -> Result<(),Box<dyn Error>> {
-		unsafe {
-			self.rdbuf.set_len(RDBUF_SIZE);
-			self.stdinrdbuf.set_len(RDBUF_SIZE);
+		for _ in 0..RDBUF_SIZE {
+			self.rdbuf.push(0);
+			self.stdinrdbuf.push(0);
 		}
+		debug_trace!("stdinrdbuf {:p}",self.stdinrdbuf.as_ptr());
 		if self.sock.is_connect_mode() {
 			self.inconn = true;
 			unsafe {
@@ -453,6 +454,9 @@ impl EvtChatClientInner {
 				if self.inrd {				
 					let completed = self.sock.complete_read()?;
 					if completed > 0 {
+						self.rdlen += 1;
+						self.rdeidx += 1;
+						self.rdeidx %= RDBUF_SIZE;
 						self.inrd = false;
 						self.__inner_sock_read()?;
 					}
@@ -675,6 +679,7 @@ impl EvtChatServerConnInner {
 				if self.wbuf.len() == 0 {
 					break;
 				}
+				debug_trace!("wbufs.len {}",self.wbufs.len());
 			}
 		}
 		Ok(())
@@ -752,6 +757,11 @@ impl EvtChatServerConnInner {
 		let mut idx :usize = 0;
 		let mut cidx :usize;
 
+		debug_trace!("rdlen {}",self.rdlen);
+		if self.rdlen == 0 {
+			return Ok(());
+		}
+
 		while idx < self.rdlen {
 			cidx = self.rdsidx + idx;
 			cidx %= self.rdbuf.len();
@@ -762,9 +772,6 @@ impl EvtChatServerConnInner {
 		self.rdsidx = self.rdeidx;
 		self.rdlen = 0;
 
-		if wbuf.len() == 0 {
-			return Ok(());
-		}
 
 		if self.wbuf.len() == 0 {
 			self.wbuf = wbuf;
@@ -797,10 +804,13 @@ impl EvtChatServerConnInner {
 	}
 
 	pub (crate) fn new_after(&mut self,parent :EvtChatServerConn) -> Result<(),Box<dyn Error>> {
-		unsafe {
-			self.rdbuf.set_len(RDBUF_SIZE);
+		for _ in 0..RDBUF_SIZE {
+			self.rdbuf.push(0);
 		}
-		self._inner_read()?;
+		let ores = self._inner_read();
+		if ores.is_err() {
+			return ores;
+		}
 		self.__insert_sock(parent.clone())?;
 		Ok(())
 	}
@@ -827,10 +837,20 @@ impl EvtChatServerConnInner {
 	}
 
 	pub (crate) fn handle(&mut self, evthd :u64,evttype :u32,_evtmain :&mut EvtMain,parent :EvtChatServerConn) -> Result<(),Box<dyn Error>> {
+		debug_trace!("handle evthd 0x{:x} evttype 0x{:x}",evthd,evttype);
 		if evthd == self.sockfd && (evttype & READ_EVENT) != 0 {
 			if self.inrd {
-				let completed = self.sock.complete_read()?;
+				let ores = self.sock.complete_read();
+				if ores.is_err() {
+					/*if error ,so clear */
+					self.__close_event_inner();
+					return Ok(());
+				}
+				let completed = ores.unwrap();
 				if completed > 0 {
+					self.rdlen += 1;
+					self.rdeidx += 1;
+					self.rdeidx %= RDBUF_SIZE;
 					self.inrd = false;
 					self._inner_read()?;
 				}				
@@ -841,8 +861,15 @@ impl EvtChatServerConnInner {
 
 		if evthd == self.sockfd && (evttype & WRITE_EVENT) != 0 {
 			if self.inwr {
-				let completed = self.sock.complete_write()?;
+				let ores = self.sock.complete_write();
+				if ores.is_err() {
+					self.__close_event_inner();
+					return Ok(());
+				}
+				let completed = ores.unwrap();
 				if completed > 0 {
+					/*we write over ,so do this*/
+					self.wbuf = Vec::new();
 					self.inwr = false;
 					self._inner_write()?;
 				}				
@@ -852,6 +879,7 @@ impl EvtChatServerConnInner {
 		}
 
 		self.__insert_sock(parent.clone())?;
+		debug_trace!("exit handle evthd 0x{:x} evttype 0x{:x}",evthd,evttype);
 		Ok(())
 	}
 
@@ -878,7 +906,7 @@ impl EvtChatServerConnInner {
 			self.sockfd = self.sock.get_sock_real();
 			unsafe {
 				(*self.svr).remove_connection(self.sockfd);
-			}			
+			}
 		}
 		self.svr = std::ptr::null_mut::<EvtChatServerInner>();
 		self.evmain = std::ptr::null_mut::<EvtMain>();
@@ -1041,6 +1069,7 @@ impl EvtChatServerInner {
 	}
 
 	pub (crate) fn handle(&mut self, evthd :u64,_evttype :u32, evmain :&mut EvtMain,parent :EvtChatServer) -> Result<(),Box<dyn Error>> {
+		debug_trace!("evthd 0x{:x} evttype 0x{:x}",evthd,_evttype);
 		if evthd == self.sockfd {
 			let completed = self.sock.complete_accept()?;
 			if completed > 0 {
@@ -1054,6 +1083,7 @@ impl EvtChatServerInner {
 		} else {
 			extargs_new_error!{EvtChatError,"not support 0x{:x} evthd ",evthd}
 		}
+		debug_trace!("exit handle evthd 0x{:x} evttype 0x{:x}",evthd,_evttype);
 		Ok(())
 	}
 

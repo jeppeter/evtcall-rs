@@ -28,6 +28,7 @@ struct TcpSockHandleInner {
 	peerport :u32,
 	localaddr :String,
 	localport : u32,
+	iscloseerr :bool,
 }
 
 pub struct TcpSockHandle {
@@ -98,6 +99,7 @@ impl TcpSockHandleInner {
 			peerport : 0,
 			localaddr : "".to_string(),
 			localport : 0,
+			iscloseerr : false,
 		}
 	}
 
@@ -119,10 +121,11 @@ impl TcpSockHandleInner {
 
 	fn _accept_inner(&mut self) -> Result<(),Box<dyn Error>> {
 		let mut reti :i32;
-		if self.inacc > 0 || self.accsock >= 0 {
+		if self.accsock >= 0 {
 			evtcall_new_error!{SockHandleError,"already in accept"}
 		}
 
+		evtcall_log_trace!("before _accept_inner");
 		unsafe {
 			let mut _slen :u32= std::mem::size_of::<libc::sockaddr_in>() as u32;
 			let _nameptr = (&mut self.acc_addr as *mut libc::sockaddr_in) as *mut libc::sockaddr;
@@ -138,6 +141,7 @@ impl TcpSockHandleInner {
 			self.accsock = reti;
 			self.inacc = 0;
 		}
+		evtcall_log_trace!("after _accept_inner inacc {}",self.inacc);
 		Ok(())
 	}
 
@@ -145,7 +149,7 @@ impl TcpSockHandleInner {
 		let flags :i32;
 		let mut reti :libc::c_int;
 		unsafe {
-			flags = libc::fcntl(sock,libc::F_GETFL);
+			flags = libc::fcntl(sock,libc::F_GETFL,0);
 			reti = libc::fcntl(sock,libc::F_SETFL,flags | libc::O_NONBLOCK);
 		}
 		if reti < 0 {
@@ -266,13 +270,13 @@ impl TcpSockHandleInner {
 			_ => {evtcall_new_error!{SockHandleError,"not valid type to accept"}}
 		}
 
-		if self.accsock < 0 {
+		if self.inacc > 0 {
 			self._accept_inner()?;
 			if self.accsock < 0{
 				evtcall_new_error!{SockHandleError,"not accepted"}
 			}
 		}
-		assert!(self.inacc == 0);
+		assert!(self.accsock >= 0);
 		retv.borrow_mut().sock = self.accsock;
 		self.accsock = DEFAULT_SOCKET;
 
@@ -483,7 +487,11 @@ impl TcpSockHandleInner {
 				}
 
 				evtcall_new_error!{SockHandleError,"read remote [{}:{}] => local [{}:{}] error {}", self.peeraddr,self.peerport,self.localaddr,self.localport,erri}
+			} else if reti == 0 {
+				self.iscloseerr = true;
+				evtcall_new_error!{SockHandleError,"read remote [{}:{}] => local [{}:{}] closed", self.peeraddr,self.peerport,self.localaddr,self.localport}
 			}
+
 
 			self.rdptr = unsafe{self.rdptr.offset(reti)};
 			self.rdlen -= reti as u32;
