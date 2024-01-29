@@ -5,21 +5,21 @@ use std::sync::atomic::{AtomicU16,AtomicU64,Ordering};
 use extargsparse_worker::{extargs_error_class,extargs_new_error};
 
 use evtcall::consts::*;
+use evtcall::eventfd::*;
 
 
 extargs_error_class!{SigHdlError}
 
-static HANDLE_EXIT :AtomicU64 = AtomicU64::new(INVALID_EVENT_HANDLE);
-static ST_SIGINITED :AtomicU16 = AtomicU16::new(0);
+//static HANDLE_EXIT :AtomicU64 = AtomicU64::new(INVALID_EVENT_HANDLE);
+//static ST_SIGINITED :AtomicU16 = AtomicU16::new(0);
+
+static EXIT_EVENTFD :Option<EventFd> = None;
 
 
 fn rust_signal(_iv :libc::c_int) {
-	if HANDLE_EXIT.load(Ordering::SeqCst) != INVALID_EVENT_HANDLE {
-		let cv :libc::eventfd_t = 1;
-		unsafe {
-			let _fd = HANDLE_EXIT.load(Ordering::SeqCst) as libc::c_int;
-			libc::eventfd_write(_fd,cv);
-		}
+	if EXIT_EVENTFD.is_some() {
+		let r :EventFd = EXIT_EVENTFD.as_ref().unwrap().clone();
+		let _ = r.set_event();
 	}
 	return;
 }
@@ -35,43 +35,19 @@ fn get_notice_signal() -> libc::sighandler_t {
 
 
 pub fn init_exit_handle() -> Result<u64,Box<dyn Error>> {
-	if ST_SIGINITED.load(Ordering::SeqCst) == 0 {
-		let mut reti :libc::c_int;
-		unsafe {
-			reti = libc::eventfd(0,0);
-		}
-		if reti < 0 {
-			extargs_new_error!{SigHdlError,"can not create event fd"}
-		}
-
-		HANDLE_EXIT.store(reti as u64, Ordering::SeqCst);
-		let sigret :libc::sighandler_t;
-
-		unsafe {
-			sigret = libc::signal(libc::SIGINT,get_notice_signal());
-		}
-		if sigret == libc::SIG_ERR {
-			reti = HANDLE_EXIT.load(Ordering::SeqCst) as libc::c_int;
-			unsafe {
-				libc::close(reti);
-			}
-			HANDLE_EXIT.store(INVALID_EVENT_HANDLE,Ordering::SeqCst);
-			extargs_new_error!{SigHdlError,"cannot set {} signal",libc::SIGINT}
-		}
-		ST_SIGINITED.store(1,Ordering::SeqCst);
+	let mut retv :u64 = INVALID_EVENT_HANDLE;
+	if EXIT_EVENTFD.is_none() {
+		let cb :EventFd = EventFd::new(0,"exit event")?;	
+		EXIT_EVENTFD = Some(cb.clone());
 	}
-	Ok(HANDLE_EXIT.load(Ordering::SeqCst))
+	let b = EXIT_EVENTFD.as_ref().unwrap().clone();
+	retv = b.get_event();
+	Ok(retv)
 }
 
 pub fn fini_exit_handle() {
-	if ST_SIGINITED.load(Ordering::SeqCst) == 1 {
-		let reti :libc::c_int;
-		reti = HANDLE_EXIT.load(Ordering::SeqCst) as libc::c_int;
-		unsafe {
-			libc::close(reti);
-		}
-		HANDLE_EXIT.store(INVALID_EVENT_HANDLE,Ordering::SeqCst);
-		ST_SIGINITED.store(0,Ordering::SeqCst);
+	if EXIT_EVENTFD.is_some(){
+		EXIT_EVENTFD = None;
 	}
 	return;
 }
