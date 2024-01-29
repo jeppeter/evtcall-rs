@@ -26,6 +26,7 @@ use super::loglib::{log_get_timestamp,log_output_function,init_log};
 use super::strop::*;
 use super::*;
 use evtcall::eventfd::*;
+use rand::prelude::*;
 
 extargs_error_class!{NetHdlError}
 
@@ -36,18 +37,20 @@ struct logarg {
 }
 
 
-
-
 fn logtest_thread(arg :logarg) {
+	let mut rnd = rand::thread_rng();
 	for i in 0..arg.num {
 		debug_trace!("{:?} thread {} trace",std::thread::current().id(),i);
 		debug_debug!("{:?} thread {} debug",std::thread::current().id(),i);
 		debug_info!("{:?} thread {} info",std::thread::current().id(),i);
 		debug_warn!("{:?} thread {} warn",std::thread::current().id(),i);
 		debug_error!("{:?} thread {} error",std::thread::current().id(),i);
-		//std::thread::sleep(std::time::Duration::from_millis(1 * 100));
+		let val :u64 = rnd.gen::<u64>() % 1000;
+		debug_error!("{:?} sleep {}",std::thread::current().id(),val);
+		std::thread::sleep(std::time::Duration::from_millis(val));
 	}
-	arg.stopsig.set_event();
+	debug_error!("{:?} exit [{}]",std::thread::current().id(),arg.stopsig.get_name());
+	let _ = arg.stopsig.set_event();
 	return;
 }
 
@@ -57,7 +60,9 @@ fn logtstthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	let mut thrids :usize = 1;
 	let mut handles = Vec::new();
 	let mut stopvec :Vec<Arc<EventFd>>=Vec::new();
+	let mut namevec :Vec<String> = Vec::new();
 	let mut bname :String;
+	//let mut rnd = rand::thread_rng();
 
 
 	init_log(ns.clone())?;
@@ -71,6 +76,7 @@ fn logtstthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	for i in 0..thrids {
 		bname = format!("thr event {}",i);
 		let curstop :Arc<EventFd> = Arc::new(EventFd::new(0,&bname)?);
+		namevec.push(format!("thr event {}",i));
 		stopvec.push(curstop.clone());
 		let logvar = logarg {
 			num : times,
@@ -87,7 +93,9 @@ fn logtstthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 		debug_info!("main thread {} info",i);
 		debug_warn!("main thread {} warn",i);
 		debug_error!("main thread {} error",i);
-		//std::thread::sleep(std::time::Duration::from_millis(1 * 100));
+		//let val :u64 = rnd.gen::<u64>() % 1000;
+		//debug_error!("main sleep {}",val);
+		//std::thread::sleep(std::time::Duration::from_millis(val));
 	}
 
 	loop {
@@ -96,16 +104,18 @@ fn logtstthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 		}
 		let mut fidx :i32 = -1;
 		for i in 0..stopvec.len() {
-			let bval = stopvec[i].get_event()?;
+			let bval = stopvec[i].is_event()?;
 			if bval {
 				fidx = i as i32;
+				debug_error!("get {} exitnotice",fidx);
 				break;
 			}
 		}
 
 		if fidx >= 0 {
-			debug_error!("remove [{}]thread",fidx);
+			debug_error!("remove [{}]thread [{}]",fidx,namevec[fidx as usize]);
 			stopvec.remove(fidx as usize);
+			namevec.remove(fidx as usize);
 			let h = handles.remove(fidx as usize);
 			h.join().unwrap();
 		}
