@@ -3,6 +3,8 @@
 pub mod consts;
 #[macro_use]
 pub mod errors;
+#[macro_use]
+pub (crate) mod macros;
 pub (crate) mod logger;
 mod timeop;
 
