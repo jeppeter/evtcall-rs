@@ -37,6 +37,7 @@ mod strop;
 mod fileop;
 mod exithdl;
 mod evttcphdl;
+mod thrtst;
 
 
 #[extargs_map_function()]
@@ -51,6 +52,7 @@ fn main() -> Result<(),Box<dyn Error>> {
 	extargs_load_commandline!(parser,commandline)?;
 	loglib::prepare_log(parser.clone())?;
 	evttcphdl::load_evchat_handler(parser.clone())?;
+	thrtst::load_thread_handler(parser.clone())?;
 	let ores = parser.parse_commandline_ex(None,None,None,None);
 	if ores.is_err() {
 		let e = ores.err().unwrap();

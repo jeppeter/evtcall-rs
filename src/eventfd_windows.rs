@@ -91,6 +91,7 @@ impl EventFdInner {
 	}
 }
 
+#[derive(Clone)]
 pub struct EventFd {
 	inner : Arc<RefCell<EventFdInner>>,
 }
@@ -122,3 +123,4 @@ impl EventFd {
 		return self.inner.borrow().set_event();
 	}
 }
+
