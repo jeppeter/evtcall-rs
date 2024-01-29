@@ -6,6 +6,7 @@ use crate::consts::*;
 
 
 use std::sync::{Arc,RwLock};
+use std::error::Error;
 
 
 struct EventFdInner {
@@ -30,7 +31,7 @@ impl EventFdInner {
 		};
 		let flags :libc::c_int = libc::EFD_NONBLOCK;
 		unsafe {
-			retv.evt = libc::eventfd(initval,falgs);
+			retv.evt = libc::eventfd(initval as u32,flags);
 		}
 		if retv.evt < 0 {
 			let erri = get_errno!();
@@ -51,17 +52,16 @@ impl EventFdInner {
 
 	fn set_event(&self) -> Result<(),Box<dyn Error>> {
 		let mut reti :i32;
-		let mut val : libc::eventfd_t = 1;
+		let val : libc::eventfd_t = 1;
 		if self.evt < 0 {
 			evtcall_new_error!{EventFdError,"{} not set event",self.name}
 		}
 		unsafe {
-			let _ptr = &mut val;
-			reti = libc::eventfd_write(self.evt,_ptr);
+			reti = libc::eventfd_write(self.evt,val);
 		}
 		if reti < 0 {
-			let reti = get_errno!();
-			evtcall_new_error!{EventFdError,"can not set event {} error {}",self.name,erri}
+			reti = get_errno!();
+			evtcall_new_error!{EventFdError,"can not set event {} error {}",self.name,reti}
 		}
 		Ok(())
 	}
@@ -81,7 +81,7 @@ impl EventFdInner {
 			if reti == -libc::EAGAIN || reti == -libc::EWOULDBLOCK {
 				return Ok(false);
 			}
-			evtcall_new_error!{EventFdInner,"{} read error {}",self.name,reti}
+			evtcall_new_error!{EventFdError,"{} read error {}",self.name,reti}
 		} 
 		if val > 0 {
 			return Ok(true);
