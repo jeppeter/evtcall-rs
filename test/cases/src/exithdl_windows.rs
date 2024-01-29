@@ -11,11 +11,16 @@ use winapi::um::errhandlingapi::GetLastError;
 
 
 use std::error::Error;
+use lazy_static::lazy_static;
 
 extargs_error_class!{ExitHandleError}
 
-//static mut HANDLE_EXIT :u64 = INVALID_EVENT_HANDLE;
-static mut EXIT_EVENTFD :Option<EventFd> = None;
+
+
+lazy_static !{
+	static ref EXIT_EVENTFD :Option<EventFd> = _get_exit_fd();
+}
+
 
 macro_rules! get_errno {
        () => {{
@@ -47,31 +52,34 @@ unsafe extern "system" fn ctrl_c_handler(ty: u32) -> BOOL {
 }
 
 
-pub fn init_exit_handle() -> Result<u64,Box<dyn Error>> {
-	let retv :u64 ;
-	let bret :BOOL;
-	if unsafe {EXIT_EVENTFD.is_none()} {
-		let b :EventFd = EventFd::new(0,"exit event")?;
-		unsafe {EXIT_EVENTFD =Some(b.clone())};
-		bret = unsafe {
-			SetConsoleCtrlHandler(Some(ctrl_c_handler),TRUE)
-		};
-		if bret == FALSE {
-			let reti = get_errno!();
-			unsafe{EXIT_EVENTFD = None};
-			extargs_new_error!{ExitHandleError,"not insert ctrl_c_handler error {}",reti}
+fn _get_exit_fd() -> Option<EventFd> {
+		let bres  = EventFd::new(0,"exit event");
+		let bret :BOOL;
+		if bres.is_err() {
+			return None;
 		}
-		debug_trace!("HANDLE_EXIT ");
+		unsafe {
+			bret = SetConsoleCtrlHandler(Some(ctrl_c_handler),TRUE);
+		}
+		if bret == FALSE {
+			return None;
+		}
+		Some(bres.unwrap())
+}
+
+
+pub fn init_exit_handle() -> Result<u64,Box<dyn Error>> {
+	let retv :u64;
+	if EXIT_EVENTFD.is_some() {
+		let b = EXIT_EVENTFD.as_ref().unwrap().clone();
+		retv = b.get_event();
+	} else {
+		extargs_new_error!{ExitHandleError,"not init EXIT_EVENTFD {}",get_errno!()}
 	}
-	let b = unsafe {EXIT_EVENTFD.as_ref().unwrap().clone()};
-	retv = b.get_event();
 	return Ok(retv);
 }
 
 
 pub fn fini_exit_handle() {
-	if unsafe {EXIT_EVENTFD.is_some()} {
-		unsafe {EXIT_EVENTFD = None};
-	}
 	return;
 }

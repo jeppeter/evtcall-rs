@@ -3,18 +3,22 @@ use std::error::Error;
 use extargsparse_worker::{extargs_error_class,extargs_new_error};
 use evtcall::eventfd::*;
 
+use lazy_static::lazy_static;
 
 extargs_error_class!{SigHdlError}
 
 //static HANDLE_EXIT :AtomicU64 = AtomicU64::new(INVALID_EVENT_HANDLE);
 //static ST_SIGINITED :AtomicU16 = AtomicU16::new(0);
 
-static mut EXIT_EVENTFD :Option<EventFd> = None;
+
+lazy_static !{
+	static ref EXIT_EVENTFD :Option<EventFd> = _get_exit_fd();
+}
 
 
 fn rust_signal(_iv :libc::c_int) {
-	if unsafe{ EXIT_EVENTFD.is_some()} {
-		let r :EventFd = unsafe {EXIT_EVENTFD.as_ref().unwrap().clone()};
+	if  EXIT_EVENTFD.is_some() {
+		let r :EventFd = EXIT_EVENTFD.as_ref().unwrap().clone();
 		let _ = r.set_event();
 	}
 	return;
@@ -30,29 +34,34 @@ fn get_notice_signal() -> libc::sighandler_t {
 }
 
 
+fn _get_exit_fd() -> Option<EventFd> {
+	let bres  = EventFd::new(0,"exit event");
+	if bres.is_err() {
+		return None;
+	}
+
+	let sigret :libc::sighandler_t;
+	unsafe {
+		sigret = libc::signal(libc::SIGINT,get_notice_signal());
+	}
+	if sigret == libc::SIG_ERR {
+		return None;
+	}
+	Some(bres.unwrap())
+}
+
+
 pub fn init_exit_handle() -> Result<u64,Box<dyn Error>> {
 	let retv :u64;
-	if unsafe {EXIT_EVENTFD.is_none()} {
-		let cb :EventFd = EventFd::new(0,"exit event")?;	
-
-		let sigret :libc::sighandler_t;
-		unsafe {
-			sigret = libc::signal(libc::SIGINT,get_notice_signal());
-		}
-		if sigret == libc::SIG_ERR {
-			extargs_new_error!{SigHdlError,"cannot set {} signal",libc::SIGINT}
-		}
-
-		unsafe {EXIT_EVENTFD = Some(cb.clone())};
+	if EXIT_EVENTFD.is_some() {
+		let b =  EXIT_EVENTFD.as_ref().unwrap().clone();
+		retv = b.get_event();
+	} else {
+		extargs_new_error!{SigHdlError,"not init exit event"}
 	}
-	let b = unsafe{ EXIT_EVENTFD.as_ref().unwrap().clone()};
-	retv = b.get_event();
 	Ok(retv)
 }
 
 pub fn fini_exit_handle() {
-	if unsafe{EXIT_EVENTFD.is_some()}{
-		unsafe {EXIT_EVENTFD = None};
-	}
 	return;
 }
