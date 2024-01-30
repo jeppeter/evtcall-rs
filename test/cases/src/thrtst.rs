@@ -8,6 +8,7 @@ use extargsparse_worker::funccall::{ExtArgsParseFunc};
 
 use std::cell::RefCell;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::error::Error;
 use std::boxed::Box;
 #[allow(unused_imports)]
@@ -128,12 +129,112 @@ fn logtstthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	Ok(())
 }
 
+fn logchannel_thread(arg :logarg,rx :mpsc::Receiver<i32>) {
+	let mut rnd = rand::thread_rng();
+	for i in 0..arg.num {
+		debug_error!("{:?} thread {} error",std::thread::current().id(),i);
+		loop {
+			let cres = rx.try_recv();
+			if cres.is_ok() {
+				debug_error!("{:?} recv {}",std::thread::current().id(),cres.unwrap());
+			} else {
+				break;
+			}
+		}
+		let val :u64 = rnd.gen::<u64>() % 1000;
+		debug_error!("{:?} sleep {}",std::thread::current().id(),val);
+		std::thread::sleep(std::time::Duration::from_millis(val));
+	}
+	debug_error!("{:?} exit [{}]",std::thread::current().id(),arg.stopsig.get_name());
+	let _ = arg.stopsig.set_event();
+	return;
+}
 
-#[extargs_map_function(logtstthr_handler)]
+
+fn thrsharedata_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {	
+	let sarr :Vec<String>  = ns.get_array("subnargs");
+	let mut times :i32 = 10;
+	let mut thrids :usize = 1;
+	let mut handles = Vec::new();
+	let mut stopvec :Vec<Arc<EventFd>>=Vec::new();
+	let mut namevec :Vec<String> = Vec::new();
+	let mut sndchannels :Vec<mpsc::Sender<i32>> = Vec::new();
+	let mut bname :String;
+	//let mut rnd = rand::thread_rng();
+
+
+	init_log(ns.clone())?;
+	if sarr.len() > 0 {
+		times = parse_u64(&sarr[0])? as i32;
+	}
+	if sarr.len() > 1 {
+		thrids = parse_u64(&sarr[1])? as usize;
+	}
+
+	for i in 0..thrids {
+		bname = format!("thr event {}",i);
+		let curstop :Arc<EventFd> = Arc::new(EventFd::new(0,&bname)?);
+		let (tx,rx) = mpsc::channel::<i32>();
+		namevec.push(format!("thr event {}",i));
+		stopvec.push(curstop.clone());
+		sndchannels.push(tx.clone());
+		let logvar = logarg {
+			num : times,
+			stopsig : curstop.clone(),
+		};
+		handles.push(std::thread::spawn(move || {
+			logchannel_thread(logvar,rx);
+		}));
+	}
+
+	for i in 0..times {
+		let mut jdx :usize = 0;
+		while jdx < sndchannels.len() {
+			let _ = sndchannels[jdx].send(i);
+			jdx += 1;
+		}
+	}
+
+	loop {
+		if stopvec.len() == 0 {
+			break;
+		}
+		let mut fidx :i32 = -1;
+		for i in 0..stopvec.len() {
+			let bval = stopvec[i].is_event()?;
+			if bval {
+				fidx = i as i32;
+				debug_error!("get {} exitnotice",fidx);
+				break;
+			}
+		}
+
+		if fidx >= 0 {
+			debug_error!("remove [{}]thread [{}]",fidx,namevec[fidx as usize]);
+			stopvec.remove(fidx as usize);
+			namevec.remove(fidx as usize);
+			sndchannels.remove(fidx as usize);
+			let h = handles.remove(fidx as usize);
+			h.join().unwrap();
+		}
+
+		if stopvec.len() > 0 {
+			std::thread::sleep(std::time::Duration::from_millis(1 * 100));
+		}
+	}
+
+	Ok(())
+}
+
+
+#[extargs_map_function(logtstthr_handler,thrsharedata_handler)]
 pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 	let cmdline = r#"
 	{
 		"logtstthr<logtstthr_handler>##[times] [threads] to log##" : {
+			"$" : "*"
+		},
+		"thrsharedata<thrsharedata_handler>##[times] [threads] to share data##" : {
 			"$" : "*"
 		}
 	}
