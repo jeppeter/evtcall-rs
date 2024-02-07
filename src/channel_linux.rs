@@ -1,7 +1,6 @@
 
 use std::sync::{mpsc,Arc};
 use crate::*;
-use crate::consts_windows::*;
 use std::error::Error;
 use std::cell::RefCell;
 
@@ -55,16 +54,16 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 		Ok(Arc::new(RefCell::new(retv)))
 	}
 
-	pub (crate) fn put(&self,val :T) -> Result<(),Box<dyn Error>> {
+	pub (crate) fn put(&self,bval :T) -> Result<(),Box<dyn Error>> {
 		let mut reti :libc::c_int;
 		let val : libc::eventfd_t = 1;
-		self.snd.send(val)?;
+		self.snd.send(bval)?;
 		unsafe {
 			reti = libc::eventfd_write(self.evt,val);
 		}
 		if reti < 0 {
 			reti = get_errno!();
-			evtcall_new_error!{EventFdError,"can not set event {} error {}",self.name,reti}
+			evtcall_new_error!{EvtChannelError,"can not set event {} error {}",self.name,reti}
 		}
 		Ok(())
 	}
