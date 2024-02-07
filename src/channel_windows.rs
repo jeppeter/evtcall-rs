@@ -99,6 +99,7 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 	}
 }
 
+#[derive(Clone)]
 pub struct EvtChannel<T : std::marker::Send + 'static > {
 	inner : Arc<RefCell<EvtChannelInner<T>>>,
 }
