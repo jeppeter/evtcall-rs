@@ -36,21 +36,6 @@ pub struct TcpSockHandle {
 }
 
 
-macro_rules! close_sock_safe {
-	($sock :expr,$name :expr) => {
-		if $sock >= 0 {
-			let mut _reti :libc::c_int;
-			unsafe {
-				_reti = libc::close($sock);
-			}
-			if _reti < 0 {
-				_reti = get_errno!();
-				evtcall_log_error!("close {} error {}",$name,_reti);
-			}
-		}
-		$sock = DEFAULT_SOCKET;
-	};
-}
 
 impl Drop for TcpSockHandleInner {
 	fn drop(&mut self) {

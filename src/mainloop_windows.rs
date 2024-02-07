@@ -17,57 +17,14 @@ use winapi::um::minwinbase::{LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES};
 use winapi::um::winbase::{WAIT_OBJECT_0};
 use winapi::um::synchapi::{CreateEventW};
 use winapi::um::handleapi::{CloseHandle};
-use crate::{evtcall_error_class,evtcall_new_error,evtcall_log_error,evtcall_log_trace};
+use crate::*;
 use crate::consts_windows::*;
 use crate::logger::*;
 
+
 evtcall_error_class!{MainLoopWindowsError}
 
-macro_rules! get_errno {
-	() => {{
-		let mut retv :i32 ;
-		unsafe {
-			retv = GetLastError() as i32;
-		}
-		if retv != 0 {
-			retv = -retv;
-		} else {
-			retv = -1;
-		}
-		retv
-	}};
-}
 
-
-macro_rules! create_event_safe {
-	($hd :expr,$name :expr) => {
-		let _errval :i32;
-		let _pattr :LPSECURITY_ATTRIBUTES = std::ptr::null_mut::<SECURITY_ATTRIBUTES>() as LPSECURITY_ATTRIBUTES;
-		let _pstr :LPCWSTR = std::ptr::null() as LPCWSTR;
-		$hd = unsafe {CreateEventW(_pattr,TRUE,FALSE,_pstr)};
-		if $hd == NULL_HANDLE_VALUE {
-			_errval = get_errno!();
-			evtcall_new_error!{MainLoopWindowsError,"create {} error {}",$name,_errval}
-		}
-	};
-}
-
-macro_rules! close_handle_safe {
-	($hdval : expr,$name :expr) => {
-		let _bret :BOOL;
-		let _errval :i32;
-		if $hdval != NULL_HANDLE_VALUE {
-			unsafe {
-				_bret = CloseHandle($hdval);
-			}
-			if _bret == FALSE {
-				_errval = get_errno!();
-				evtcall_log_error!("CloseHandle {} error {}",$name,_errval);
-			}
-		}
-		$hdval = NULL_HANDLE_VALUE;
-	};
-}
 
 
 #[derive(Clone)]
@@ -133,7 +90,7 @@ impl EvtMain {
 			exited : 0,
 		};
 		retv.timerevt.push(NULL_HANDLE_VALUE);
-		create_event_safe!(retv.timerevt[0],"timer event");
+		create_event_safe!(retv.timerevt[0],"timer event",MainLoopWindowsError);
 		Ok(retv)
 	}
 

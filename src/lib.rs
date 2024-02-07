@@ -31,3 +31,4 @@ pub mod consts_windows;
 pub mod mainloop;
 pub mod interface;
 pub mod eventfd;
+pub mod channel;
