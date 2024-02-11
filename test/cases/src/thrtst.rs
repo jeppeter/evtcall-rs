@@ -29,7 +29,7 @@ use super::*;
 use evtcall::eventfd::*;
 use rand::prelude::*;
 
-extargs_error_class!{NetHdlError}
+extargs_error_class!{ThrHdlError}
 
 #[allow(non_camel_case_types)]
 struct logarg {
@@ -226,6 +226,108 @@ fn thrsharedata_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSe
 	Ok(())
 }
 
+struct CommonChannelInner {
+	thrrcv : EvtChannel<String>,
+	thrsnd : EvtChannel<String>,
+	exitevt : EventFd,
+	exitnotify : EventFd,
+	evtmain :*mut EvtMain,	
+	insertrcv : bool,
+	insertexit : bool,
+}
+
+#[derive(Clone)]
+struct CommonChannel  {
+	inner :Arc<RefCell<CommonChannelInner>>,
+}
+
+impl CommonChannelInner {
+	fn new(snd :EvtChannel<String>,rcv :EvtChannel<String>, exitevt : EventFd,exitnotify :EventFd,evtmain :*mut EvtMain) -> Result<Arc<RefCell<Self>>, Box<dyn Error>> {
+		let retv :Self = Self {
+			thrrcv : rcv.clone(),
+			thrsnd : snd.clone(),
+			exitevt : exitevt.clone(),
+			exitnotify : exitnotify.clone(),
+			evtmain : evtmain,
+			insertrcv : false,
+			insertexit : false,
+		};
+
+		Ok(Arc::new(RefCell::new(retv)))
+	}
+
+	fn add_events(&mut self, parent : CommonChannel) -> Result<(),Box<dyn Error>> {
+		if !self.thrrcv {
+			let _ = self.evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.exitevt.get_event(),READ_EVENT)?;
+			self.insertrcv = true;
+
+		}
+		if !self.insertexit {
+			let _ = self.evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.thrrcv.get_evt(),READ_EVENT)?;
+			self.insertexit = true;			
+		}
+		Ok(())
+	}
+
+	fn close(&mut self) {
+		self.close_event();
+	}
+
+	fn close_event(&mut self) {
+		if self.insertrcv {
+			self.evtmain.remove_event(self.thrrcv.get_evt());
+			self.insertrcv = false;
+		}
+		if self.insertexit {
+			self.evtmain.remove_event(self.exitevt.get_event());
+			self.insertexit = false;
+		}
+		return;		
+	}
+
+	fn handle_event(&mut self, evthd : u64, _evttype : u32,parent :CommonChannel) -> Result<(),Box<dyn Error>> {
+		if evthd == self.thrrcv.get_evt() {
+
+		} else if evthd == self.exitevt.get_event() {
+
+		} else {
+			extargs_new_error!{ThrHdlError,"thread [{:?}]not support evthd 0x{:x}",std::thread::current().id(),evthd}
+		}
+		Ok(())
+	}
+
+}
+
+impl CommonChannel {
+	fn new(rcv :EvtChannel<String>,snd :EvtChannel<String>,exitevt : EventFd,exitnotify :EventFd, evtmain :*mut EvtMain) -> Result<Self,Box<dyn Error>> {
+		let mut retv : Self = Self {
+			inner : CommonChannelInner::new(rcv,snd,exitevt,exitnotify,evtmain)?,
+		};
+		let _ = retv.inner.borrow_mut().add_events(retv.clone())?;
+		Ok(retv)
+	}
+
+}
+
+impl EvtCall for CommonChannel {
+	fn debug_mode(&mut self,_fname :&str, _lineno :u32) {
+		return;
+	}
+
+	fn handle(&mut self,evthd :u64, _evttype :u32,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+		return self.inner.borrow_mut().handle_event(evthd,_evttype,self.clone());
+	}
+}
+
+fn logchannel_thread(chl :CommonChannel) -> Result<(),Box<dyn Error>> {
+	let mut evtmain :EvtMain;
+
+	evtmain = EvtMain::new(0)?;
+
+
+	return;
+}
+
 
 #[extargs_map_function(logtstthr_handler,thrsharedata_handler)]
 pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
@@ -235,6 +337,9 @@ pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 			"$" : "*"
 		},
 		"thrsharedata<thrsharedata_handler>##[times] [threads] to share data##" : {
+			"$" : "*"
+		},
+		"thrchannel<thrchannel_handler>##[times] [threads] to communicate channel##" : {
 			"$" : "*"
 		}
 	}
