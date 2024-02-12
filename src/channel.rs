@@ -49,3 +49,6 @@ impl<T : std::marker::Send + 'static > EvtChannel<T> {
 	}
 
 }
+
+unsafe impl<T : std::marker::Send + 'static > Sync for EvtChannel<T> {}
+unsafe impl<T : std::marker::Send + 'static > Send for EvtChannel<T> {}

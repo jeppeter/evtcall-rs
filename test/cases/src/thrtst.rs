@@ -26,7 +26,11 @@ use extargsparse_worker::{extargs_error_class,extargs_new_error};
 use super::loglib::{log_get_timestamp,log_output_function,init_log};
 use super::strop::*;
 use super::*;
+use evtcall::interface::*;
+use evtcall::consts::*;
 use evtcall::eventfd::*;
+use evtcall::mainloop::*;
+use evtcall::channel::*;
 use rand::prelude::*;
 
 extargs_error_class!{ThrHdlError}
@@ -226,12 +230,13 @@ fn thrsharedata_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSe
 	Ok(())
 }
 
+#[allow(dead_code)]
 struct CommonChannelInner {
 	thrrcv : EvtChannel<String>,
 	thrsnd : EvtChannel<String>,
 	exitevt : EventFd,
 	exitnotify : EventFd,
-	evtmain :*mut EvtMain,	
+	evtmain :*mut EvtMain,
 	insertrcv : bool,
 	insertexit : bool,
 }
@@ -239,6 +244,12 @@ struct CommonChannelInner {
 #[derive(Clone)]
 struct CommonChannel  {
 	inner :Arc<RefCell<CommonChannelInner>>,
+}
+
+impl Drop for CommonChannelInner {
+	fn drop(&mut self) {
+		self.close();
+	}
 }
 
 impl CommonChannelInner {
@@ -257,54 +268,100 @@ impl CommonChannelInner {
 	}
 
 	fn add_events(&mut self, parent : CommonChannel) -> Result<(),Box<dyn Error>> {
-		if !self.thrrcv {
-			let _ = self.evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.exitevt.get_event(),READ_EVENT)?;
+		if !self.insertrcv {
+			unsafe {
+				let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.thrrcv.get_evt(),READ_EVENT)?;
+			}
 			self.insertrcv = true;
 
 		}
 		if !self.insertexit {
-			let _ = self.evtmain.add_event(Arc::new(RefCell::new(parent.clone())),self.thrrcv.get_evt(),READ_EVENT)?;
+			unsafe {
+				let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.exitevt.get_event(),READ_EVENT)?;
+			}
 			self.insertexit = true;			
 		}
 		Ok(())
 	}
 
-	fn close(&mut self) {
+	pub fn close(&mut self) {
 		self.close_event();
 	}
 
 	fn close_event(&mut self) {
 		if self.insertrcv {
-			self.evtmain.remove_event(self.thrrcv.get_evt());
+			unsafe {
+				let _ = &(*self.evtmain).remove_event(self.thrrcv.get_evt());
+			}
 			self.insertrcv = false;
 		}
 		if self.insertexit {
-			self.evtmain.remove_event(self.exitevt.get_event());
+			unsafe {
+				let _ = &(*self.evtmain).remove_event(self.exitevt.get_event());
+			}
 			self.insertexit = false;
 		}
 		return;		
 	}
 
-	fn handle_event(&mut self, evthd : u64, _evttype : u32,parent :CommonChannel) -> Result<(),Box<dyn Error>> {
+	fn handle_event(&mut self, evthd : u64, _evttype : u32,_parent :CommonChannel) -> Result<(),Box<dyn Error>> {
 		if evthd == self.thrrcv.get_evt() {
+			let mut inserted : bool = false;
+			loop {
+				let op :Option<String> = self.thrrcv.get()?;
+				if op.is_none() {
+					break;
+				}
+				let s :String = op.unwrap();
+				let snds :String = format!("{:?}[{}]",std::thread::current().id(),s);
+				let _ = self.thrsnd.put(snds)?;
+				inserted = true;
+			}
 
+			if inserted {
+				let _ = self.thrsnd.set_evt()?;
+			}
+			let _ = self.thrrcv.reset_evt()?;
 		} else if evthd == self.exitevt.get_event() {
-
+			/*to close*/
+			unsafe {
+				let _ = &(*self.evtmain).break_up()?;	
+			}
+			
 		} else {
 			extargs_new_error!{ThrHdlError,"thread [{:?}]not support evthd 0x{:x}",std::thread::current().id(),evthd}
 		}
 		Ok(())
 	}
 
+	fn exit_notify(&mut self) -> Result<(),Box<dyn Error>> {
+		self.exitnotify.set_event()?;
+		Ok(())
+	}
+
+}
+
+impl Drop for CommonChannel {
+	fn drop(&mut self) {
+		self.close();
+	}
 }
 
 impl CommonChannel {
 	fn new(rcv :EvtChannel<String>,snd :EvtChannel<String>,exitevt : EventFd,exitnotify :EventFd, evtmain :*mut EvtMain) -> Result<Self,Box<dyn Error>> {
-		let mut retv : Self = Self {
+		let retv : Self = Self {
 			inner : CommonChannelInner::new(rcv,snd,exitevt,exitnotify,evtmain)?,
 		};
 		let _ = retv.inner.borrow_mut().add_events(retv.clone())?;
 		Ok(retv)
+	}
+
+	fn exit_notify(&mut self) -> Result<(),Box<dyn Error>> {
+		return self.inner.borrow_mut().exit_notify();
+	}
+
+	pub fn close(&mut self) {
+		debug_trace!("close CommonChannelInner");
 	}
 
 }
@@ -317,19 +374,74 @@ impl EvtCall for CommonChannel {
 	fn handle(&mut self,evthd :u64, _evttype :u32,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
 		return self.inner.borrow_mut().handle_event(evthd,_evttype,self.clone());
 	}
+
+	fn close_event(&mut self,_evthd :u64, _evttype :u32,_evtmain :&mut EvtMain)  {
+		return self.inner.borrow_mut().close_event();
+	}
 }
 
-fn logchannel_thread(chl :CommonChannel) -> Result<(),Box<dyn Error>> {
+fn evtchannel_thread(snd :EvtChannel<String>,rcv :EvtChannel<String>,exitevt : EventFd,exitnotify :EventFd) -> Result<(),Box<dyn Error>> {
 	let mut evtmain :EvtMain;
-
 	evtmain = EvtMain::new(0)?;
-
-
-	return;
+	let evtptr = &mut evtmain as *mut EvtMain;
+	let mut cmnchl :CommonChannel = CommonChannel::new(rcv,snd,exitevt,exitnotify,evtptr)?;
+	let _ = evtmain.main_loop()?;
+	let _ = cmnchl.exit_notify()?;
+	return Ok(());
 }
 
+#[allow(unused_variables)]
+#[allow(unused_assignments)]
+fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {	
+	let sarr :Vec<String>  = ns.get_array("subnargs");
+	let mut times :i32 = 10;
+	let mut thrids :usize = 1;
+	let mut handles = Vec::new();
+	let mut exitvec :Vec<EventFd>=Vec::new();
+	let mut notifyvec :Vec<EventFd> = Vec::new();
+	let mut thrrcvs :Vec<EvtChannel<String>> = Vec::new();
+	let mut thrsnds :Vec<EvtChannel<String>> = Vec::new();
+	let mut sndcnts :Vec<usize> = Vec::new();
+	let mut rcvcnts :Vec<usize> = Vec::new();
+	//let mut rnd = rand::thread_rng();
 
-#[extargs_map_function(logtstthr_handler,thrsharedata_handler)]
+
+	init_log(ns.clone())?;
+	if sarr.len() > 0 {
+		times = parse_u64(&sarr[0])? as i32;
+	}
+	if sarr.len() > 1 {
+		thrids = parse_u64(&sarr[1])? as usize;
+	}
+
+	for i in 0..thrids {
+		let mut bname :String = format!("exitevt[{}]",i);
+		let exitevt :EventFd = EventFd::new(0,&bname)?;
+		bname = format!("exitnotify[{}]",i);
+		let exitnotify : EventFd = EventFd::new(0,&bname)?;
+		bname = format!("threadsnd[{}]",i);
+		let thrsnd :EvtChannel<String> = EvtChannel::new(0,&bname)?;
+		bname = format!("threadrcv[{}]",i);
+		let thrrcv : EvtChannel<String> = EvtChannel::new(0,&bname)?;
+
+		exitvec.push(exitevt.clone());
+		notifyvec.push(exitnotify.clone());
+		thrsnds.push(thrsnd.clone());
+		thrrcvs.push(thrrcv.clone());
+		sndcnts.push(0);
+		rcvcnts.push(0);
+
+		handles.push(std::thread::spawn(move || {
+			let _ = evtchannel_thread(thrsnd.clone(),thrrcv.clone(),exitevt.clone(),exitnotify.clone());
+		}));
+	}
+
+
+
+	Ok(())
+}
+
+#[extargs_map_function(logtstthr_handler,thrsharedata_handler,thrchannel_handler)]
 pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 	let cmdline = r#"
 	{
