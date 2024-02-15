@@ -54,7 +54,7 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 		Ok(Arc::new(RefCell::new(retv)))
 	}
 
-	pub (crate) fn set_evt(&self) -> Result<(),Box<dyn Error>> {
+	pub (crate) fn set_event(&self) -> Result<(),Box<dyn Error>> {
 		let mut reti :libc::c_int;
 		let val : libc::eventfd_t = 1;
 		unsafe {
@@ -85,11 +85,11 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 		return Ok(retv);
 	}
 
-	pub (crate) fn get_evt(&self) -> u64 {
+	pub (crate) fn get_event(&self) -> u64 {
 		return self.evt as u64;
 	}
 
-	pub (crate) fn reset_evt(&self) -> Result<(),Box<dyn Error>> {
+	pub (crate) fn reset_event(&self) -> Result<(),Box<dyn Error>> {
 		let mut val :libc::eventfd_t = 0;
 		let mut reti :libc::c_int;
 		unsafe {

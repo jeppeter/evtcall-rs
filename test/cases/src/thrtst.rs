@@ -270,7 +270,7 @@ impl CommonChannelInner {
 	fn add_events(&mut self, parent : CommonChannel) -> Result<(),Box<dyn Error>> {
 		if !self.insertrcv {
 			unsafe {
-				let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.thrrcv.get_evt(),READ_EVENT)?;
+				let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.thrrcv.get_event(),READ_EVENT)?;
 			}
 			self.insertrcv = true;
 
@@ -291,7 +291,7 @@ impl CommonChannelInner {
 	fn close_event(&mut self) {
 		if self.insertrcv {
 			unsafe {
-				let _ = &(*self.evtmain).remove_event(self.thrrcv.get_evt());
+				let _ = &(*self.evtmain).remove_event(self.thrrcv.get_event());
 			}
 			self.insertrcv = false;
 		}
@@ -305,7 +305,7 @@ impl CommonChannelInner {
 	}
 
 	fn handle_event(&mut self, evthd : u64, _evttype : u32,_parent :CommonChannel) -> Result<(),Box<dyn Error>> {
-		if evthd == self.thrrcv.get_evt() {
+		if evthd == self.thrrcv.get_event() {
 			let mut inserted : bool = false;
 			loop {
 				let op :Option<String> = self.thrrcv.get()?;
@@ -319,9 +319,9 @@ impl CommonChannelInner {
 			}
 
 			if inserted {
-				let _ = self.thrsnd.set_evt()?;
+				let _ = self.thrsnd.set_event()?;
 			}
-			let _ = self.thrrcv.reset_evt()?;
+			let _ = self.thrrcv.reset_event()?;
 		} else if evthd == self.exitevt.get_event() {
 			/*to close*/
 			unsafe {
@@ -390,6 +390,270 @@ fn evtchannel_thread(snd :EvtChannel<String>,rcv :EvtChannel<String>,exitevt : E
 	return Ok(());
 }
 
+
+struct ThrMainInner {
+	thrs :Vec<std::thread::JoinHandle<()>>,
+	exitevts : Vec<EventFd>,	
+	exitnotifies : Vec<EventFd>,
+	thrrcvs : Vec<EvtChannel<String>>,
+	thrsnds : Vec<EvtChannel<String>>,
+	thrcnts : Vec<i32>,
+	insertnotifies : Vec<i32>,
+	insertsnds : Vec<i32>,
+	timeguids : Vec<u64>,
+	evtmain : *mut EvtMain,
+	maxcnt : i32,
+}
+
+#[derive(Clone)]
+struct ThrMain {
+	inner : Arc<RefCell<ThrMainInner>>,
+}
+
+impl ThrMainInner {
+	fn new(thrs : Vec<std::thread::JoinHandle<()>>,exitevts :Vec<EventFd>,exitnotifies : Vec<EventFd>,
+		thrrcvs :Vec<EvtChannel<String>>,thrsnds : Vec<EvtChannel<String>>,evtmain :*mut EvtMain,times : i32) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+		let mut retv : Self = Self {
+			thrs : thrs,
+			exitevts : exitevts.clone(),
+			exitnotifies : exitnotifies.clone(),
+			thrrcvs : thrrcvs.clone(),
+			thrsnds : thrsnds.clone(),
+			thrcnts : Vec::new(),
+			insertnotifies : Vec::new(),
+			insertsnds : Vec::new(),
+			timeguids : Vec::new(),
+			evtmain : evtmain,
+			maxcnt : times,
+		};
+
+		for _ in 0..retv.thrs.len() {
+			retv.thrcnts.push(0);
+			retv.insertnotifies.push(0);
+			retv.insertsnds.push(0);
+			retv.timeguids.push(0);
+		}
+		Ok(Arc::new(RefCell::new(retv)))
+	}
+
+	fn insert_events(&mut self, parent :ThrMain) -> Result<(),Box<dyn Error>> {
+		let mut rnd = rand::thread_rng();
+		for i in 0..self.thrs.len() {
+			if self.insertnotifies[i] == 0 {
+				unsafe {
+					let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.exitnotifies[i].get_event(),READ_EVENT)?;
+				}
+				self.insertnotifies[i] = 1;				
+			}
+
+			if self.insertsnds[i] == 0 {
+				unsafe {
+					let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.thrsnds[i].get_event(),READ_EVENT)?;
+				}
+				self.insertsnds[i] = 1;
+			}
+
+			if self.timeguids[i] == 0 {
+				let val :u64 = rnd.gen::<u64>() % 1000;
+				unsafe {
+					self.timeguids[i] = (*self.evtmain).add_timer(Arc::new(RefCell::new(parent.clone())),val as i32, false)?;
+				}
+			}
+		}
+		Ok(())
+	}
+
+	fn _find_thrsnd(&self,evthd :u64) -> i32 {
+		for i in 0..self.thrsnds.len() {
+			if self.thrsnds[i].get_event() == evthd {
+				return i as i32;
+			}
+		}
+		return -1;
+	}
+
+	fn _find_timeguid(&self,timeguid :u64) -> i32 {
+		for i in 0..self.timeguids.len() {
+			if self.timeguids[i] == timeguid {
+				return i as i32;
+			}
+		}
+		return -1;
+	}
+
+	fn _find_exitnotify(&self,evthd :u64) -> i32 {
+		for i in 0..self.exitnotifies.len() {
+			if self.exitnotifies[i].get_event() == evthd {
+				return i as i32;
+			}
+		}
+		return -1;
+	}
+
+	fn _handle_thread_snd(&mut self, idx :i32,parent : ThrMain) -> Result<(),Box<dyn Error>> {
+		let fidx :usize = idx as usize;
+		loop {
+			let p :Option<String> = self.thrsnds[fidx].get()?;
+			if p.is_none() {
+				break;
+			}
+			debug_trace!("main thread receive [{}] [{}]",idx,p.unwrap());
+		}
+
+		self.thrcnts[fidx] += 1;
+		if self.thrcnts[fidx] >= self.maxcnt {
+			/*now we should send for the */
+			self.exitevts[fidx].set_event()?;			
+		} else {
+			/*now to get the timevalue*/
+			if self.timeguids[fidx] > 0 {
+				debug_error!("[{}] timer remove",fidx);
+				unsafe {
+					let _ = (*self.evtmain).remove_timer(self.timeguids[fidx]);
+				}
+				self.timeguids[fidx]  = 0;
+			}
+			let mut rnd = rand::thread_rng();
+			let val :u64 = rnd.gen::<u64>() % 1000;
+
+			unsafe {
+				self.timeguids[fidx] = (*self.evtmain).add_timer(Arc::new(RefCell::new(parent.clone())), val as i32 , false)?;
+			}
+		}
+
+		Ok(())
+	}
+
+	fn _handle_thread_exit(&mut self,idx :i32, _parent :ThrMain) -> Result<(),Box<dyn Error>> {
+		let fidx :usize = idx as usize;
+		let thr = self.thrs.remove(fidx);
+		thr.join().unwrap();
+		/*now to remove all the things*/
+		if self.insertsnds[fidx] > 0 {
+			unsafe {
+				let _ = (*self.evtmain).remove_event(self.thrsnds[fidx].get_event());
+			}
+			self.insertsnds[fidx] = 0;
+		}
+
+		if self.insertnotifies[fidx] > 0 {
+			unsafe {
+				let _ = (*self.evtmain).remove_event(self.exitnotifies[fidx].get_event());
+			}
+			self.insertnotifies[fidx] = 0;
+		}
+
+		if self.timeguids[fidx] > 0 {
+			unsafe {
+				let _ = (*self.evtmain).remove_timer(self.timeguids[fidx]);
+			}
+			self.timeguids[fidx] = 0;
+		}
+
+		self.insertsnds.remove(fidx);
+		self.insertnotifies.remove(fidx);
+		self.thrsnds.remove(fidx);
+		self.thrrcvs.remove(fidx);
+		self.exitevts.remove(fidx);
+		self.exitnotifies.remove(fidx);
+		self.timeguids.remove(fidx);
+		self.thrcnts.remove(fidx);
+		Ok(())
+	}
+
+	fn _handle_timer(&mut self,idx :i32, _parent :ThrMain) -> Result<(),Box<dyn Error>> {
+		let fidx :usize = idx as usize;
+		let snds :String = format!("main to thr cnt [{}]",self.thrcnts[fidx]);
+		if self.timeguids[fidx] > 0 {
+			unsafe {
+				let _ = (*self.evtmain).remove_timer(self.timeguids[fidx]);
+			}
+			self.timeguids[fidx] = 0;
+		}
+		let _ = self.thrrcvs[fidx].put(snds)?;
+		let _ = self.thrrcvs[fidx].set_event()?;
+		Ok(())
+	}
+
+
+	fn handle_event(&mut self,evthd :u64, _evttype : u32, parent :ThrMain) -> Result<(),Box<dyn Error>> {
+		let mut fidx :i32;
+		fidx = self._find_thrsnd(evthd);
+		if fidx >= 0 {
+			let _ = self._handle_thread_snd(fidx,parent.clone())?;
+		} else {
+			fidx = self._find_exitnotify(evthd);
+			if fidx >= 0 {
+				let _ = self._handle_thread_exit(fidx,parent.clone())?;
+			} else {
+				extargs_new_error!{ThrHdlError,"evthd 0x{:x} not recognize",evthd}
+			}
+		}
+
+		Ok(())
+	}
+
+	fn timer_func(&mut self,timeguid :u64, parent :ThrMain) -> Result<(),Box<dyn Error>> {
+		let fidx :i32;
+		fidx = self._find_timeguid(timeguid);
+		if fidx >= 0 {
+			let _ = self._handle_timer(fidx,parent.clone())?;
+		} else {
+			extargs_new_error!{ThrHdlError,"not support 0x{:x} timer",timeguid}
+		}
+		Ok(())
+	}
+
+	fn close_event(&mut self) {
+		return;
+	}
+
+	fn close_timer(&mut self) {
+		return;
+	}
+}
+
+impl ThrMain {
+
+
+	fn new(thrs : Vec<std::thread::JoinHandle<()>>,exitevts :Vec<EventFd>,exitnotifies : Vec<EventFd>,
+		thrrcvs :Vec<EvtChannel<String>>,thrsnds : Vec<EvtChannel<String>>,evtmain :*mut EvtMain,times : i32) -> Result<Self,Box<dyn Error>> {
+		let retv : Self = Self {
+			inner : ThrMainInner::new(thrs,exitevts,exitnotifies,thrrcvs,thrsnds,evtmain,times)?,
+		};
+		let _ = retv.inner.borrow_mut().insert_events(retv.clone())?;
+		Ok(retv)
+	}
+}
+
+
+impl EvtCall for ThrMain {
+	fn debug_mode(&mut self,_fname :&str, _lineno :u32) {
+		return;
+	}
+
+	fn handle(&mut self,_evthd :u64, _evttype :u32,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+		return self.inner.borrow_mut().handle_event(_evthd,_evttype,self.clone());
+	}
+
+	fn close_event(&mut self,_evthd :u64, _evttype :u32,_evtmain :&mut EvtMain) {
+		self.inner.borrow_mut().close_event();
+	}
+}
+
+impl EvtTimer for ThrMain {
+	fn timer(&mut self,_timerguid :u64,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>>{
+		return self.inner.borrow_mut().timer_func(_timerguid,self.clone());
+	}
+
+	fn close_timer(&mut self,_timerguid :u64, _evtmain :&mut EvtMain) {
+		self.inner.borrow_mut().close_timer();
+		return;
+	}
+}
+
+
+
 #[allow(unused_variables)]
 #[allow(unused_assignments)]
 fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {	
@@ -436,7 +700,10 @@ fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetI
 		}));
 	}
 
+	let mut evtmain : EvtMain = EvtMain::new(0)?;
+	let mainthrs :ThrMain = ThrMain::new(handles,exitvec,notifyvec,thrrcvs,thrsnds,&mut evtmain as *mut EvtMain,times)?;
 
+	let _ = evtmain.main_loop()?;
 
 	Ok(())
 }

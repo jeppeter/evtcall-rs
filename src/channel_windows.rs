@@ -52,7 +52,7 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 		Ok(Arc::new(RefCell::new(retv)))
 	}
 
-	pub (crate) fn set_evt(&self) -> Result<(),Box<dyn Error>> {
+	pub (crate) fn set_event(&self) -> Result<(),Box<dyn Error>> {
 		let bret :BOOL ;
 		unsafe {
 			bret = SetEvent(self.evt);
@@ -82,11 +82,11 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 		return Ok(retv);
 	}
 
-	pub (crate) fn get_evt(&self) -> u64 {
+	pub (crate) fn get_event(&self) -> u64 {
 		return self.evt as u64;
 	}
 
-	pub (crate) fn reset_evt(&self) -> Result<(),Box<dyn Error>> {
+	pub (crate) fn reset_event(&self) -> Result<(),Box<dyn Error>> {
 		let bret :BOOL;
 		if self.evt == NULL_HANDLE_VALUE {
 			return Ok(());

@@ -36,16 +36,16 @@ impl<T : std::marker::Send + 'static > EvtChannel<T> {
 		return self.inner.borrow().get();
 	}
 
-	pub fn get_evt(&self) -> u64 {
-		return self.inner.borrow().get_evt();
+	pub fn get_event(&self) -> u64 {
+		return self.inner.borrow().get_event();
 	}
 
-	pub fn reset_evt(&self)  -> Result<(),Box<dyn Error>> {
-		return self.inner.borrow().reset_evt();
+	pub fn reset_event(&self)  -> Result<(),Box<dyn Error>> {
+		return self.inner.borrow().reset_event();
 	}
 
-	pub fn set_evt(&self)   -> Result<(),Box<dyn Error>> {
-		return self.inner.borrow().set_evt();
+	pub fn set_event(&self)   -> Result<(),Box<dyn Error>> {
+		return self.inner.borrow().set_event();
 	}
 
 }
