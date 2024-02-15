@@ -407,12 +407,27 @@ struct ThrMainInner {
 	maxcnt : i32,
 }
 
+impl Drop for ThrMainInner {
+	fn drop(&mut self) {
+		self.close();
+	}
+}
+
 #[derive(Clone)]
 struct ThrMain {
 	inner : Arc<RefCell<ThrMainInner>>,
 }
 
+impl Drop for ThrMain {
+	fn drop(&mut self) {
+		self.close();
+	}
+}
+
 impl ThrMainInner {
+	fn close(&mut self) {
+		self.close_inner();		
+	}
 	fn new(thrs : Vec<std::thread::JoinHandle<()>>,exitevts :Vec<EventFd>,exitnotifies : Vec<EventFd>,
 		thrrcvs :Vec<EvtChannel<String>>,thrsnds : Vec<EvtChannel<String>>,evtmain :*mut EvtMain,times : i32) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
 		let mut retv : Self = Self {
@@ -662,6 +677,10 @@ impl ThrMainInner {
 }
 
 impl ThrMain {
+
+	fn close(&mut self) {
+		debug_trace!("close ThrMain");
+	}
 
 	fn new(thrs : Vec<std::thread::JoinHandle<()>>,exitevts :Vec<EventFd>,exitnotifies : Vec<EventFd>,
 		thrrcvs :Vec<EvtChannel<String>>,thrsnds : Vec<EvtChannel<String>>,evtmain :*mut EvtMain,times : i32) -> Result<Self,Box<dyn Error>> {
