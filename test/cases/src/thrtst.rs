@@ -253,7 +253,7 @@ impl Drop for CommonChannelInner {
 }
 
 impl CommonChannelInner {
-	fn new(snd :EvtChannel<String>,rcv :EvtChannel<String>, exitevt : EventFd,exitnotify :EventFd,evtmain :*mut EvtMain) -> Result<Arc<RefCell<Self>>, Box<dyn Error>> {
+	fn new(rcv :EvtChannel<String>,snd :EvtChannel<String>, exitevt : EventFd,exitnotify :EventFd,evtmain :*mut EvtMain) -> Result<Arc<RefCell<Self>>, Box<dyn Error>> {
 		let retv :Self = Self {
 			thrrcv : rcv.clone(),
 			thrsnd : snd.clone(),
@@ -382,10 +382,12 @@ impl EvtCall for CommonChannel {
 
 fn evtchannel_thread(snd :EvtChannel<String>,rcv :EvtChannel<String>,exitevt : EventFd,exitnotify :EventFd) -> Result<(),Box<dyn Error>> {
 	let mut evtmain :EvtMain;
+	debug_trace!("threads [{:?}]",std::thread::current().id());
 	evtmain = EvtMain::new(0)?;
 	let evtptr = &mut evtmain as *mut EvtMain;
 	let mut cmnchl :CommonChannel = CommonChannel::new(rcv,snd,exitevt,exitnotify,evtptr)?;
 	let _ = evtmain.main_loop()?;
+	debug_trace!("exit_notify");
 	let _ = cmnchl.exit_notify()?;
 	return Ok(());
 }
@@ -495,6 +497,7 @@ impl ThrMainInner {
 
 	fn _handle_thread_snd(&mut self, idx :i32,parent : ThrMain) -> Result<(),Box<dyn Error>> {
 		let fidx :usize = idx as usize;
+		let _ = self.thrsnds[fidx].reset_event()?;
 		loop {
 			let p :Option<String> = self.thrsnds[fidx].get()?;
 			if p.is_none() {
@@ -529,6 +532,7 @@ impl ThrMainInner {
 
 	fn _handle_thread_exit(&mut self,idx :i32, _parent :ThrMain) -> Result<(),Box<dyn Error>> {
 		let fidx :usize = idx as usize;
+		debug_trace!("thread exit {}",fidx);
 		let thr = self.thrs.remove(fidx);
 		thr.join().unwrap();
 		/*now to remove all the things*/
@@ -561,6 +565,12 @@ impl ThrMainInner {
 		self.exitnotifies.remove(fidx);
 		self.timeguids.remove(fidx);
 		self.thrcnts.remove(fidx);
+		if self.thrcnts.len() == 0 {
+			/*nothing to handle so break_up*/
+			unsafe {
+				let _ = (*self.evtmain).break_up()?;
+			}
+		}
 		Ok(())
 	}
 
