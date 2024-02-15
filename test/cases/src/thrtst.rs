@@ -273,13 +273,13 @@ impl CommonChannelInner {
 				let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.thrrcv.get_event(),READ_EVENT)?;
 			}
 			self.insertrcv = true;
-
+			debug_trace!("add thrrcv [0x{:x}]",self.thrrcv.get_event());
 		}
 		if !self.insertexit {
 			unsafe {
 				let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.exitevt.get_event(),READ_EVENT)?;
 			}
-			self.insertexit = true;			
+			self.insertexit = true;
 		}
 		Ok(())
 	}
@@ -443,6 +443,7 @@ impl ThrMainInner {
 				unsafe {
 					let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.exitnotifies[i].get_event(),READ_EVENT)?;
 				}
+				debug_trace!("insert 0x{:x} notifies",self.exitnotifies[i].get_event());
 				self.insertnotifies[i] = 1;				
 			}
 
@@ -450,6 +451,7 @@ impl ThrMainInner {
 				unsafe {
 					let _ = &(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.thrsnds[i].get_event(),READ_EVENT)?;
 				}
+				debug_trace!("insert 0x{:x} thrsnds",self.thrsnds[i].get_event());
 				self.insertsnds[i] = 1;
 			}
 
@@ -458,6 +460,7 @@ impl ThrMainInner {
 				unsafe {
 					self.timeguids[i] = (*self.evtmain).add_timer(Arc::new(RefCell::new(parent.clone())),val as i32, false)?;
 				}
+				debug_trace!("add [{}] timeguids[0x{:x}] val {}",i,self.timeguids[i],val);
 			}
 		}
 		Ok(())
@@ -570,8 +573,10 @@ impl ThrMainInner {
 			}
 			self.timeguids[fidx] = 0;
 		}
+		debug_trace!("will snd [{}]",snds);
 		let _ = self.thrrcvs[fidx].put(snds)?;
 		let _ = self.thrrcvs[fidx].set_event()?;
+		debug_trace!("main set [0x{:x}] event",self.thrrcvs[fidx].get_event());
 		Ok(())
 	}
 
@@ -604,17 +609,49 @@ impl ThrMainInner {
 		Ok(())
 	}
 
+	fn close_inner(&mut self) {
+		for i in 0..self.insertnotifies.len() {
+			if self.insertnotifies[i] > 0 {
+				unsafe {
+					let _ = (*self.evtmain).remove_event(self.exitnotifies[i].get_event());
+				}
+				self.insertnotifies[i] = 0;
+			}
+		}
+
+		for i in 0..self.insertsnds.len() {
+			if self.insertsnds[i] > 0 {
+				unsafe {
+					let _ = (*self.evtmain).remove_event(self.thrsnds[i].get_event());
+				}
+				self.insertsnds[i] = 0;
+			}
+		}
+
+		for i in 0..self.timeguids.len() {
+			if self.timeguids[i] > 0 {
+				unsafe {
+					let _ = (*self.evtmain).remove_timer(self.timeguids[i]);
+				}
+				self.timeguids[i] = 0;
+			}
+		}
+
+		return;
+	}
+
 	fn close_event(&mut self) {
+		self.close_inner();
 		return;
 	}
 
 	fn close_timer(&mut self) {
+		self.close_inner();
 		return;
 	}
 }
 
 impl ThrMain {
-
 
 	fn new(thrs : Vec<std::thread::JoinHandle<()>>,exitevts :Vec<EventFd>,exitnotifies : Vec<EventFd>,
 		thrrcvs :Vec<EvtChannel<String>>,thrsnds : Vec<EvtChannel<String>>,evtmain :*mut EvtMain,times : i32) -> Result<Self,Box<dyn Error>> {
@@ -633,6 +670,7 @@ impl EvtCall for ThrMain {
 	}
 
 	fn handle(&mut self,_evthd :u64, _evttype :u32,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
+		debug_trace!("evthd 0x{:x} evttype 0x{:x}",_evthd,_evttype);
 		return self.inner.borrow_mut().handle_event(_evthd,_evttype,self.clone());
 	}
 
@@ -643,6 +681,7 @@ impl EvtCall for ThrMain {
 
 impl EvtTimer for ThrMain {
 	fn timer(&mut self,_timerguid :u64,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>>{
+		debug_trace!("timeguid 0x{:x}",_timerguid);
 		return self.inner.borrow_mut().timer_func(_timerguid,self.clone());
 	}
 
@@ -680,12 +719,16 @@ fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetI
 
 	for i in 0..thrids {
 		let mut bname :String = format!("exitevt[{}]",i);
+		debug_trace!("{}",bname);
 		let exitevt :EventFd = EventFd::new(0,&bname)?;
 		bname = format!("exitnotify[{}]",i);
+		debug_trace!("{}",bname);
 		let exitnotify : EventFd = EventFd::new(0,&bname)?;
 		bname = format!("threadsnd[{}]",i);
+		debug_trace!("{}",bname);
 		let thrsnd :EvtChannel<String> = EvtChannel::new(0,&bname)?;
 		bname = format!("threadrcv[{}]",i);
+		debug_trace!("{}",bname);
 		let thrrcv : EvtChannel<String> = EvtChannel::new(0,&bname)?;
 
 		exitvec.push(exitevt.clone());
