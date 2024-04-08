@@ -26,5 +26,5 @@ impl ThreadEvent {
 	pub (crate) fn set_exited(&mut self) -> Result<(),Box<dyn Error>> {
 		Ok(())
 	}
-
 }
+
