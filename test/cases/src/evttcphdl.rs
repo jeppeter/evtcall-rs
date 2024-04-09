@@ -23,9 +23,9 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 
 #[allow(unused_imports)]
-use super::{debug_trace,debug_buffer_trace,format_buffer_log,format_str_log,debug_error};
+use extlog::{debug_trace,debug_buffer_trace,format_buffer_log,format_str_log,debug_error};
 #[allow(unused_imports)]
-use super::loglib::{log_get_timestamp,log_output_function,init_log};
+use extlog::loglib::{log_get_timestamp,log_output_function};
 use super::strop::{parse_u64};
 
 use evtcall::interface::*;
@@ -33,6 +33,7 @@ use evtcall::consts::*;
 use evtcall::mainloop::EvtMain;
 use evtcall::sockhdl::{TcpSockHandle,init_socket,fini_socket};
 use std::io::{Write};
+use super::logtrans::{init_log};
 
 use super::exithdl::*;
 

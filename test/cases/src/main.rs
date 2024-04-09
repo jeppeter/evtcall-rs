@@ -28,11 +28,7 @@ use std::any::Any;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 
-#[cfg(windows)]
-mod wchar_windows;
-#[cfg(windows)]
-mod loglib_windows;
-mod loglib;
+mod logtrans;
 mod strop;
 mod fileop;
 mod exithdl;
@@ -50,7 +46,7 @@ fn main() -> Result<(),Box<dyn Error>> {
 	}
 	"#;
 	extargs_load_commandline!(parser,commandline)?;
-	loglib::prepare_log(parser.clone())?;
+	logtrans::prepare_log(parser.clone())?;
 	evttcphdl::load_evchat_handler(parser.clone())?;
 	thrtst::load_thread_handler(parser.clone())?;
 	let ores = parser.parse_commandline_ex(None,None,None,None);

@@ -1,8 +1,8 @@
 
 use evtcall::eventfd::*;
 use extargsparse_worker::{extargs_error_class,extargs_new_error};
-use super::{format_str_log,debug_trace};
-use super::loglib::{log_get_timestamp,log_output_function};
+use extlog::{format_str_log,debug_trace};
+use extlog::loglib::{log_get_timestamp,log_output_function};
 
 use winapi::shared::minwindef::{BOOL,TRUE,FALSE};
 use winapi::um::wincon::CTRL_C_EVENT;

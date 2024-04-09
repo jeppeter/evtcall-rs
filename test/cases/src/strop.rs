@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
-use super::{debug_trace,debug_buffer_trace,format_buffer_log};
+use extlog::{debug_trace,debug_buffer_trace,format_buffer_log};
 #[allow(unused_imports)]
-use super::loglib::{log_get_timestamp,log_output_function,init_log};
+use extlog::loglib::{log_get_timestamp,log_output_function};
 
 #[allow(unused_imports)]
 use extargsparse_worker::{extargs_error_class,extargs_new_error};

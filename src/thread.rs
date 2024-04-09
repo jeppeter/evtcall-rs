@@ -43,6 +43,7 @@ impl ThreadEventInner {
 
 }
 
+#[derive(Clone)]
 pub struct ThreadEvent {
 	inner :Arc<RwLock<ThreadEventInner>>,
 }
@@ -87,7 +88,7 @@ pub (crate) struct EvtBody<T> {
 }
 
 
-pub struct EvtSyncUnsafeCell<T> {
+pub (crate) struct EvtSyncUnsafeCell<T> {
     inner: UnsafeCell<T>,
 }
 
@@ -96,7 +97,7 @@ unsafe impl<T> Sync for EvtSyncUnsafeCell<T> {}
 impl<T> EvtSyncUnsafeCell<T> {
     /// Constructs a new instance of `EvtSyncUnsafeCell` which will wrap the specified value.
     #[inline]
-    pub const fn new(value: T) -> Self {
+    pub (crate)  const fn new(value: T) -> Self {
         Self { inner: UnsafeCell::new(value), }
     }
 
@@ -110,11 +111,11 @@ impl<T> EvtSyncUnsafeCell<T> {
     /// when casting to `&mut T`, and ensure that there are no mutations
     /// or mutable aliases going on when casting to `&T`
     #[inline]
-    pub const fn get(&self) -> *mut T {
+    pub (crate) const fn get(&self) -> *mut T {
         self.inner.get()
     }
-
 }
+
 
 
 impl<T> EvtBody<T> {
@@ -188,10 +189,10 @@ impl<T> EvtThreadInner<T> {
 }
 
 impl<T : 'static> EvtThreadInner<T> {
-	pub (crate) fn new() -> Result<Self,Box<dyn Error>> {
+	pub (crate) fn new(threvt :ThreadEvent) -> Result<Self,Box<dyn Error>> {
 		let retv : Self = Self {
 			chld : Vec::new(),
-			evts : ThreadEvent::new()?,
+			evts : threvt,
 			started : false,
 			retval : EvtBody::new(),
 		};
@@ -249,14 +250,14 @@ impl<T> Drop for EvtThread<T> {
 
 impl<T> EvtThread<T> {
 	pub fn close(&mut self) {
-		evtcall_log_trace!("EvtThread close");
+		evtcall_log_trace!("EvtThread close cnt {}",Arc::strong_count(&self.inner));
 	}
 }
 
 impl<T : 'static>  EvtThread<T> {
-	pub fn new() -> Result<Self,Box<dyn Error>> {
+	pub fn new(threvt :ThreadEvent) -> Result<Self,Box<dyn Error>> {
 		let retv : Self = Self {
-			inner : Arc::new(EvtSyncUnsafeCell::new(EvtThreadInner::new()?)),
+			inner : Arc::new(EvtSyncUnsafeCell::new(EvtThreadInner::new(threvt)?)),
 		};
 		Ok(retv)
 	}

@@ -18,18 +18,21 @@ use std::any::Any;
 
 use lazy_static::lazy_static;
 use std::collections::HashMap;
+use std::time::{Instant};
 
 #[allow(unused_imports)]
 use extargsparse_worker::{extargs_error_class,extargs_new_error};
 
 
-use super::loglib::{log_get_timestamp,log_output_function,init_log};
+use extlog::loglib::{log_get_timestamp,log_output_function};
 use super::strop::*;
-use super::*;
+use super::logtrans::{init_log};
+use extlog::{debug_trace,debug_error,format_str_log,debug_warn,debug_info,debug_debug};
 use evtcall::interface::*;
 use evtcall::consts::*;
 use evtcall::eventfd::*;
 use evtcall::mainloop::*;
+use evtcall::thread::{EvtThread,ThreadEvent};
 use evtcall::channel::*;
 use rand::prelude::*;
 
@@ -720,10 +723,7 @@ impl EvtTimer for ThrMain {
 	}
 }
 
-
-
 #[allow(unused_variables)]
-#[allow(unused_assignments)]
 fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {	
 	let sarr :Vec<String>  = ns.get_array("subnargs");
 	let mut times :i32 = 10;
@@ -780,7 +780,131 @@ fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetI
 	Ok(())
 }
 
-#[extargs_map_function(logtstthr_handler,thrsharedata_handler,thrchannel_handler)]
+struct ThreadData {
+	pub val : i32,
+	pub vals :String,
+}
+
+impl ThreadData {
+	fn new(val :i32, vs :&str) -> Self {
+		Self {
+			val : val,
+			vals : format!("{}",vs),
+		}
+	}
+}
+
+fn thread_call_new(threvt :ThreadEvent , mills : u32) -> ThreadData {
+	let now = Instant::now();
+	let wmills :u128 = mills as u128;
+	let mut bnotified : bool =false;
+	let noteevt : u64 = threvt.get_notice_exit_event();
+	let mut cnt : i32 = 0;
+	loop {
+		let curmills = now.elapsed().as_millis();
+		if curmills > wmills {
+			break;
+		}
+
+		if !bnotified {
+			bnotified = wait_event_fd_timeout(noteevt,10);			
+		} else {
+			std::thread::sleep(std::time::Duration::from_millis(10));
+		}
+
+		cnt += 1;
+
+		if (cnt % 100) == 0 {
+			debug_trace!("[{}]bnotified [{}]",cnt,bnotified);
+		}
+	}
+
+	return ThreadData::new(20,"hello");
+}
+
+fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {	
+	let mut parentmills : u32 = 1000;
+	let mut childmills : u32 = 900;
+	let sarr :Vec<String>;
+	let  mut evt :ThreadEvent = ThreadEvent::new().unwrap();
+	let mut notwait :bool = false;
+
+	init_log(ns.clone())?;
+	sarr = ns.get_array("subnargs");
+	if sarr.len() > 0 {
+		parentmills = parse_u64(&sarr[0])? as u32;
+	}
+
+	if sarr.len() > 1 {
+		childmills = parse_u64(&sarr[1])? as u32;
+	}
+
+	if sarr.len() > 2 {
+		notwait = true;
+	}
+
+	let mut thr :EvtThread<ThreadData> = EvtThread::new(evt.clone())?;
+	let oevt = evt.clone();
+	thr.start(move || {
+		return thread_call_new(oevt,childmills);
+	})?;
+	let chldevt :u64 = evt.get_exit_event();
+	let now :Instant = Instant::now();
+	let wmills : u128 = parentmills as u128;
+	let mut bval : bool = false;
+	let mut cnt : i32 = 0;
+	loop {
+		let curmills = now.elapsed().as_millis();
+		if curmills > wmills {
+			break;
+		}
+		if !bval {
+			bval = wait_event_fd_timeout(chldevt,10);			
+		} else {
+			std::thread::sleep(std::time::Duration::from_millis(10));
+		}
+
+		cnt += 1;
+
+		if (cnt % 100) == 0 {
+			debug_trace!("[{}]bval [{}]",cnt,bval);
+		}
+	}
+
+	let _ = evt.set_notice_exit_event();
+
+	if !notwait {
+		loop {
+			if thr.is_exited() {
+				break;
+			}
+			if !bval {
+				bval = wait_event_fd_timeout(chldevt,10);			
+			} else {
+				std::thread::sleep(std::time::Duration::from_millis(10));
+			}
+			cnt += 1;
+
+			if (cnt % 100) == 0 {
+				debug_trace!("[{}]not exited",cnt);
+			}
+		}
+
+		loop {
+			let cdata :Option<ThreadData> = thr.get_return();
+			if cdata.is_some() {
+				let cptr :ThreadData = cdata.unwrap();
+				debug_trace!("cdata.val {} cdata.vals {}",cptr.val,cptr.vals);
+				break;
+			}
+			std::thread::sleep(std::time::Duration::from_millis(10));
+			debug_trace!("will try again get_return");
+		}		
+	}
+	Ok(())
+}
+
+#[extargs_map_function(logtstthr_handler,thrsharedata_handler,thrchannel_handler,evtthr_handler)]
 pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 	let cmdline = r#"
 	{
@@ -791,6 +915,9 @@ pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 			"$" : "*"
 		},
 		"thrchannel<thrchannel_handler>##[times] [threads] to communicate channel##" : {
+			"$" : "*"
+		},
+		"evtthr<evtthr_handler>##[parenttime] [childtime] to make evtthr default parenttime 1000 childtime 900 milliseconds##" : {
 			"$" : "*"
 		}
 	}
