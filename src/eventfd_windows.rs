@@ -104,4 +104,7 @@ impl EventFdInner {
 	}
 }
 
+pub (crate) fn wait_event_fd_timeout_inner(_evtfd :u64, _mills :i32) -> bool {
+	return false;
+}
 

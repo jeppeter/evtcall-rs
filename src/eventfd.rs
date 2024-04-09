@@ -71,5 +71,10 @@ impl EventFd {
 
 }
 
+pub fn wait_event_fd_timeout(evtfd :u64, mills :i32) -> bool {
+	wait_event_fd_timeout_inner(evtfd,mills)
+}
+
+
 unsafe impl Sync for EventFd {}
 unsafe impl Send for EventFd {}

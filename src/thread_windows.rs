@@ -7,12 +7,12 @@ use winapi::um::errhandlingapi::{GetLastError};
 use crate::consts_windows::*;
 
 #[derive(Clone)]
-pub (crate) struct ThreadEvent {
+pub (crate) struct ThreadEventInner {
 	exithdl : HANDLE,
 	setexithdl :HANDLE,
 }
 
-impl ThreadEvent {
+impl ThreadEventInner {
 	pub (crate) fn new () -> Result<Self, Box<dyn Error>> {
 		let mut retv :Self = Self {
 			exithdl :  NULL_HANDLE_VALUE,
@@ -23,8 +23,20 @@ impl ThreadEvent {
 		Ok(retv)
 	}
 
-	pub (crate) fn set_exited(&mut self) -> Result<(),Box<dyn Error>> {
+	pub (crate) fn set_exit_event(&mut self) -> Result<(),Box<dyn Error>> {
 		Ok(())
+	}
+
+	pub (crate) fn set_notice_exit_event(&mut self) -> Result<(),Box<dyn Error>> {
+		Ok(())
+	}
+
+	pub (crate) fn get_exit_event(&self) -> u64 {
+		return 0;
+	}
+
+	pub (crate) fn get_notice_exit_event(&self) -> u64 {
+		return 0;
 	}
 }
 
