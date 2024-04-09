@@ -103,5 +103,30 @@ impl EventFdInner {
 }
 
 pub (crate) fn wait_event_fd_timeout_inner(evtfd :u64, mills :i32) -> bool {
+	let mut fset :libc::fd_set = unsafe{std::mem::zeroed()};
+	let mut tval :libc::timeval = unsafe {std::mem::zeroed()};
+	unsafe {
+		let _ptr = &mut fset as *mut libc::fd_set;
+		libc::FD_ZERO(_ptr);
+		libc::FD_SET(evtfd as libc::c_int, _ptr);
+	}
+	let maxfd = evtfd as i32 + 1;
+	let reti : libc::c_int;
+	if mills < 0 {
+		tval.tv_sec = 0;
+		tval.tv_usec = 0;
+	} else {
+		tval.tv_sec = (mills / 1000) as libc::time_t;
+		tval.tv_usec = ((mills % 1000) * 1000) as libc::suseconds_t;
+	}
+	unsafe {
+		let _ptr = &mut fset as *mut libc::fd_set;
+		let _nullptr = std::ptr::null_mut::<libc::fd_set>();
+		let _tvptr = &mut tval as *mut libc::timeval;
+		reti = libc::select(maxfd,_ptr,_nullptr,_nullptr,_tvptr);
+	}
+	if reti > 0 {
+		return true;
+	}
 	return false;
 }

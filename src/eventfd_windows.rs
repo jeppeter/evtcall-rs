@@ -104,7 +104,22 @@ impl EventFdInner {
 	}
 }
 
-pub (crate) fn wait_event_fd_timeout_inner(_evtfd :u64, _mills :i32) -> bool {
+pub (crate) fn wait_event_fd_timeout_inner(evtfd :u64, mills :i32) -> bool {
+	let waithd :HANDLE = evtfd as HANDLE;
+	let dret :DWORD;
+	if mills < 0 {
+		unsafe {
+			dret = WaitForSingleObject(waithd,0);	
+		}		
+	} else {
+		unsafe {
+			dret = WaitForSingleObject(waithd,mills as u32);	
+		}		
+	}
+
+	if dret == WAIT_OBJECT_0 {
+		return true;
+	}
 	return false;
 }
 
