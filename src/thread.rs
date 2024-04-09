@@ -162,6 +162,7 @@ impl<T> Drop for EvtThreadInner<T> {
 
 impl<T> EvtThreadInner<T> {
 	pub fn close(&mut self) {
+		evtcall_log_trace!("call EvtThreadInner close");
 		if self.started {
 			let exitevt = self.evts.get_exit_event();
 			let _ = self.evts.set_notice_exit_event();
@@ -187,7 +188,7 @@ impl<T> EvtThreadInner<T> {
 }
 
 impl<T : 'static> EvtThreadInner<T> {
-	pub fn new() -> Result<Self,Box<dyn Error>> {
+	pub (crate) fn new() -> Result<Self,Box<dyn Error>> {
 		let retv : Self = Self {
 			chld : Vec::new(),
 			evts : ThreadEvent::new()?,
@@ -197,7 +198,7 @@ impl<T : 'static> EvtThreadInner<T> {
 		Ok(retv)
 	}
 
-	pub fn is_exited(&mut self) -> bool {
+	pub (crate) fn is_exited(&mut self) -> bool {
 		if !self.started {
 			return true;
 		}
@@ -206,7 +207,7 @@ impl<T : 'static> EvtThreadInner<T> {
 		return bval;
 	}
 
-	pub fn start<F :  FnOnce() -> T + 'static + Send + Sync>(&mut self,ncall :F, other :Arc<EvtSyncUnsafeCell<EvtThreadInner<T>>>) -> Result<(),Box<dyn Error>> {
+	pub (crate) fn start<F :  FnOnce() -> T + 'static + Send + Sync>(&mut self,ncall :F, other :Arc<EvtSyncUnsafeCell<EvtThreadInner<T>>>) -> Result<(),Box<dyn Error>> {
 		if !self.started {
 			let cother = other.clone();
 			let o = std::thread::spawn(move || {
@@ -224,14 +225,60 @@ impl<T : 'static> EvtThreadInner<T> {
 		Ok(())
 	}
 
-	pub fn get_return(&mut self) -> Option<T> {
+	pub (crate) fn get_return(&mut self) -> Option<T> {
 		return self.retval.get();
 	}
 
-	pub fn stop(&mut self) -> Result<(),Box<dyn Error>> {
+	pub (crate) fn stop(&mut self) -> Result<(),Box<dyn Error>> {
 		if !self.started {
 			return Ok(());
 		}
 		return self.evts.set_notice_exit_event();
+	}
+}
+
+pub struct EvtThread<T> {
+	inner : Arc<EvtSyncUnsafeCell<EvtThreadInner<T>>>,
+}
+
+impl<T> Drop for EvtThread<T> {
+	fn drop(&mut self) {
+		self.close();
+	}
+}
+
+impl<T> EvtThread<T> {
+	pub fn close(&mut self) {
+		evtcall_log_trace!("EvtThread close");
+	}
+}
+
+impl<T : 'static>  EvtThread<T> {
+	pub fn new() -> Result<Self,Box<dyn Error>> {
+		let retv : Self = Self {
+			inner : Arc::new(EvtSyncUnsafeCell::new(EvtThreadInner::new()?)),
+		};
+		Ok(retv)
+	}
+
+	pub fn is_exited(&mut self) -> bool {
+		let refm :&mut EvtThreadInner<T> = unsafe {&mut *self.inner.get()}; 
+		refm.is_exited()
+	}
+
+	pub fn start<F :  FnOnce() -> T + 'static + Send + Sync>(&mut self,ncall :F) -> Result<(),Box<dyn Error>> {
+		let o = self.inner.clone();
+		let refm :&mut EvtThreadInner<T> = unsafe {&mut *self.inner.get()}; 
+		refm.start(ncall,o)
+	}
+
+	pub fn get_return(&mut self) -> Option<T> {
+		let refm :&mut EvtThreadInner<T> = unsafe {&mut *self.inner.get()}; 
+		return refm.get_return();
+	}
+
+	pub fn stop(&mut self) -> Result<(),Box<dyn Error>> {
+		let refm :&mut EvtThreadInner<T> = unsafe {&mut *self.inner.get()}; 
+		return refm.stop();
 	}
 }
