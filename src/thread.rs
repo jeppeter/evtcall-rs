@@ -148,7 +148,7 @@ unsafe impl<T> Sync for EvtBody<T> {}
 
 //pub struct EvtThreadInner<F,T> 
 pub struct EvtThreadInner<T> {
-	chld : Option<JoinHandle<()>>,
+	chld : Vec<JoinHandle<()>>,
 	evts : ThreadEvent,
 	started : bool,
 	retval : EvtBody<T>,
@@ -167,7 +167,6 @@ impl<T> EvtThreadInner<T> {
 			let _ = self.evts.set_notice_exit_event();
 			let mut cnt : u64 = 0;
 			loop {
-
 				let bval = wait_event_fd_timeout(exitevt,10);
 				if bval {
 					break;
@@ -178,24 +177,33 @@ impl<T> EvtThreadInner<T> {
 					evtcall_log_error!("wait thread cnt [{}]",cnt);
 				}
 			}
-			let wo = self.chld.as_ref().unwrap();
-			let _ = (*wo).join();
-			self.chld = None;
+			if self.chld.len() > 0 {
+				let o = self.chld.pop().unwrap();
+				let _ = o.join();
+			}
 			self.started = false;
 		}
 	}
 }
 
-//impl<F,T> EvtThreadInner<F,T>
 impl<T : 'static> EvtThreadInner<T> {
 	pub fn new() -> Result<Self,Box<dyn Error>> {
 		let retv : Self = Self {
-			chld : None,
+			chld : Vec::new(),
 			evts : ThreadEvent::new()?,
 			started : false,
 			retval : EvtBody::new(),
 		};
 		Ok(retv)
+	}
+
+	pub fn is_exited(&mut self) -> bool {
+		if !self.started {
+			return true;
+		}
+		let exitevt = self.evts.get_exit_event();
+		let bval = wait_event_fd_timeout(exitevt,-1);
+		return bval;
 	}
 
 	pub fn start<F :  FnOnce() -> T + 'static + Send + Sync>(&mut self,ncall :F, other :Arc<EvtSyncUnsafeCell<EvtThreadInner<T>>>) -> Result<(),Box<dyn Error>> {
@@ -210,7 +218,7 @@ impl<T : 'static> EvtThreadInner<T> {
 				}
 				()
 			});
-			self.chld = Some(o);
+			self.chld.push(o);
 			self.started = true;
 		}
 		Ok(())
@@ -218,5 +226,12 @@ impl<T : 'static> EvtThreadInner<T> {
 
 	pub fn get_return(&mut self) -> Option<T> {
 		return self.retval.get();
+	}
+
+	pub fn stop(&mut self) -> Result<(),Box<dyn Error>> {
+		if !self.started {
+			return Ok(());
+		}
+		return self.evts.set_notice_exit_event();
 	}
 }
