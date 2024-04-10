@@ -2,6 +2,7 @@
 //use crate::consts::*;
 use std::thread::{JoinHandle};
 use crate::*;
+#[allow(unused_imports)]
 use crate::logger::*;
 use std::error::Error;
 use std::cell::UnsafeCell;

@@ -14,6 +14,7 @@ use winapi::um::errhandlingapi::{GetLastError};
 use winapi::um::minwinbase::{LPSECURITY_ATTRIBUTES,SECURITY_ATTRIBUTES};
 use winapi::um::synchapi::*;
 
+#[allow(unused_imports)]
 use crate::logger::*;
 
 evtcall_error_class!{EvtChannelError}

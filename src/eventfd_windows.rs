@@ -11,6 +11,7 @@ use std::sync::{Arc,RwLock};
 use std::error::Error;
 
 use crate::*;
+#[allow(unused_imports)]
 use crate::logger::*;
 use crate::consts_windows::*;
 use crate::consts::*;
@@ -51,7 +52,12 @@ impl EventFdInner {
 		Ok(Arc::new(RwLock::new(retv)))
 	}
 
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
+		evtcall_log_trace!("[{}:{}]EventFdInner [{}] [{:p}]",_fname,_line,self.name,self);
+	}
+
 	pub fn close(&mut self) {
+		self.debug_self(file!(),line!());
 		evtcall_log_trace!("close EventFdInner");
 		if self.evt != NULL_HANDLE_VALUE {
 			unsafe {

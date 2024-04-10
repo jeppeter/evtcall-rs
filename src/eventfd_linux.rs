@@ -41,7 +41,13 @@ impl EventFdInner {
 		Ok(Arc::new(RwLock::new(retv)))
 	}
 
+	
+	pub fn debug_self(&self,fname :&str,line :u32) {
+		evtcall_log_trace!("[{}:{}]EventFdInner [{}] [{:p}]",fname,line,self.name,self);
+	}
+
 	pub fn close(&mut self) {
+		self.debug_self(file!(),line!());
 		evtcall_log_trace!("close EventFdInner");
 		if self.evt >= 0 {
 			unsafe {

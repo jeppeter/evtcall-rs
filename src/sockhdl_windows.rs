@@ -21,6 +21,7 @@ use super::{evtcall_error_class,evtcall_new_error};
 use super::consts_windows::{NULL_HANDLE_VALUE};
 use super::consts::*;
 use std::error::Error;
+#[allow(unused_imports)]
 use crate::logger::*;
 use crate::*;
 use crate::sockhdltype::{TcpSockType};
@@ -885,7 +886,7 @@ impl TcpSockHandleInner {
 		let bret :BOOL;
 		let mut dret : DWORD = 0;
 		let retu :u32;
-		let wsaerru :c_int;
+		let _wsaerru :c_int;
 		let mut errval :c_int = 0;
 		if self.inconn > 0 {
 			unsafe {
@@ -897,8 +898,8 @@ impl TcpSockHandleInner {
 			}
 			if bret == FALSE {
 				retu = get_errno_direct!();
-				wsaerru = get_wsa_errno_direct!();
-				evtcall_log_trace!("retu {} wsaerru {}",retu,wsaerru);
+				_wsaerru = get_wsa_errno_direct!();
+				evtcall_log_trace!("retu {} wsaerru {}",retu,_wsaerru);
 
 				unsafe {
 					let _eptr = (&mut errval as *mut c_int) as *mut i8;

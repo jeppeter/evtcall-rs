@@ -78,6 +78,7 @@ lazy_static! {
 	};
 }
 
+#[allow(dead_code)]
 pub (crate)  fn evtcall_debug_out(level :i32, outs :&str) {
 	if EVTCALL_OPTIONS_LOG_LEVEL.level >= level {
 		let c = format!("{}\n",outs);
@@ -93,12 +94,13 @@ pub (crate)  fn evtcall_debug_out(level :i32, outs :&str) {
 	return;
 }
 
+#[allow(dead_code)]
 pub (crate) fn evtcall_log_get_timestamp() -> String {
 	let now = Local::now();
 	return format!("{}/{}/{} {}:{}:{}",now.year(),now.month(),now.day(),now.hour(),now.minute(),now.second());
 }
 
-
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_log_error {
 	($($arg:tt)+) => {
@@ -108,6 +110,14 @@ macro_rules! evtcall_log_error {
 	}
 }
 
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_log_error {
+	($($arg:tt)+) => {}
+}
+
+
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_log_warn {
 	($($arg:tt)+) => {
@@ -117,7 +127,14 @@ macro_rules! evtcall_log_warn {
 	}
 }
 
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_log_warn {
+	($($arg:tt)+) => {}
+}
 
+
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_log_info {
 	($($arg:tt)+) => {
@@ -127,6 +144,14 @@ macro_rules! evtcall_log_info {
 	}
 }
 
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_log_info {
+	($($arg:tt)+) => {}
+}
+
+
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_log_trace {
 	($($arg:tt)+) => {
@@ -136,7 +161,14 @@ macro_rules! evtcall_log_trace {
 	}
 }
 
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_log_trace {
+	($($arg:tt)+) => {}
+}
 
+
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_assert {
 	($v:expr , $($arg:tt)+) => {
@@ -147,6 +179,13 @@ macro_rules! evtcall_assert {
 		}
 	}
 }
+
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_assert {
+	($($arg:tt)+) => {}
+}
+
 
 #[macro_export]
 macro_rules! evtcall_format_buffer_log {
@@ -210,6 +249,7 @@ macro_rules! evtcall_format_buffer_log {
 	}
 }
 
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_debug_buffer_error {
 	($buf:expr,$len:expr,$($arg:tt)+) => {
@@ -217,6 +257,14 @@ macro_rules! evtcall_debug_buffer_error {
 	}
 }
 
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_debug_buffer_error {
+	($buf:expr,$len:expr,$($arg:tt)+) => {}
+}
+
+
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_debug_buffer_warn {
 	($buf:expr,$len:expr,$($arg:tt)+) => {
@@ -224,6 +272,14 @@ macro_rules! evtcall_debug_buffer_warn {
 	}
 }
 
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_debug_buffer_warn {
+	($buf:expr,$len:expr,$($arg:tt)+) => {}
+}
+
+
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_debug_buffer_info {
 	($buf:expr,$len:expr,$($arg:tt)+) => {
@@ -231,6 +287,14 @@ macro_rules! evtcall_debug_buffer_info {
 	}
 }
 
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_debug_buffer_info {
+	($buf:expr,$len:expr,$($arg:tt)+) => {}
+}
+
+
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_debug_buffer_debug {
 	($buf:expr,$len:expr,$($arg:tt)+) => {
@@ -238,9 +302,23 @@ macro_rules! evtcall_debug_buffer_debug {
 	}
 }
 
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_debug_buffer_debug {
+	($buf:expr,$len:expr,$($arg:tt)+) => {}
+}
+
+
+#[cfg(feature="debug_mode")]
 #[macro_export]
 macro_rules! evtcall_debug_buffer_trace {
 	($buf:expr,$len:expr,$($arg:tt)+) => {
 		evtcall_format_buffer_log!($buf,$len,"<DEBUG>",40,$($arg)+);
 	}
+}
+
+#[cfg(not(feature="debug_mode"))]
+#[macro_export]
+macro_rules! evtcall_debug_buffer_trace {
+	($buf:expr,$len:expr,$($arg:tt)+) => {}
 }
