@@ -12,6 +12,7 @@ use std::error::Error;
 struct EventFdInner {
 	evt : i32,
 	name :String,
+	flags : u32,
 }
 
 impl Drop for EventFdInner {
@@ -23,11 +24,11 @@ impl Drop for EventFdInner {
 evtcall_error_class!{EventFdError}
 
 impl EventFdInner {
-	//fn new(_initval :i32,name :&str) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
-	fn new(initval :i32,name :&str) -> Result<Arc<RwLock<Self>>,Box<dyn Error>> {
+	fn new(initval :i32,flags :u32,name :&str) -> Result<Arc<RwLock<Self>>,Box<dyn Error>> {
 		let mut retv :Self = Self {
 			evt : -1,
 			name : format!("{}",name),
+			flags : flags,
 		};
 		let flags :libc::c_int = libc::EFD_NONBLOCK;
 		unsafe {
@@ -72,21 +73,11 @@ impl EventFdInner {
 			evtcall_new_error!{EventFdError,"{} not valid",self.name}
 		}
 		let mut val :libc::eventfd_t = 0;
-		unsafe {
-			let _ptr = &mut val;
-			reti = libc::eventfd_read(self.evt,_ptr);
+		let bval = wait_event_fd_timeout_inner(self.evt,0);
+		if bval &&  (self.flags & EVENT_NO_AUTO_RESET) == 0 {
+			let _ = self.reset_event();
 		}
-		if reti < 0 {
-			reti = get_errno!();
-			if reti == -libc::EAGAIN || reti == -libc::EWOULDBLOCK {
-				return Ok(false);
-			}
-			evtcall_new_error!{EventFdError,"{} read error {}",self.name,reti}
-		} 
-		if val > 0 {
-			return Ok(true);
-		}
-		return Ok(false);
+		Ok(bval)
 	}
 
 	fn get_event(&self) -> u64 {
@@ -99,6 +90,24 @@ impl EventFdInner {
 
 	fn get_name(&self) -> String {
 		return format!("{}",self.name);
+	}
+
+	fn wait_event(&self,mills :i32) -> bool {
+		return wait_event_fd_timeout_inner(self.evt,mills);
+	}
+
+	fn reset_event(&self) -> Result<(),Box<dyn Error>> {
+		let reti :i32;
+		let val : libc::eventfd_t = 1;
+		unsafe {
+			let _ptr = &mut val;
+			reti = libc::eventfd_read(self.evt,_ptr);
+		}
+		if reti < 0 {
+			let erri = get_errno!();
+			evtcall_new_error!{EventFdError,"can not eventfd_read {} error {}",self.name,erri}
+		}
+		Ok(())
 	}
 }
 

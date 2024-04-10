@@ -18,9 +18,9 @@ impl Drop for EventFd {
 
 
 impl EventFd {
-	pub fn new(_initval :i32,name :&str) -> Result<Self,Box<dyn Error>> {
+	pub fn new(_initval :i32, flags :u32,name :&str) -> Result<Self,Box<dyn Error>> {
 		let retv :Self = Self {
-			inner : EventFdInner::new(_initval,name)?,
+			inner : EventFdInner::new(_initval,flags,name)?,
 		};
 		Ok(retv)
 	}
@@ -67,6 +67,24 @@ impl EventFd {
 		let b = bres.unwrap();
 		let retv = b.get_name();
 		return retv;
+	}
+
+	pub fn wait_event(&self,mills :i32) -> bool {
+		let bres = self.inner.read();
+		if bres.is_err() {
+			return false;
+		}
+		let b = bres.unwrap();
+		return b.wait_event(mills);
+	}
+
+	pub fn reset_event(&self) -> Result<(),Box<dyn Error>> {
+		let bres = self.inner.read();
+		if bres.is_err() {
+			evtcall_new_error!{EventFdError,"{}",bres.err().unwrap()}
+		}
+		let b = bres.unwrap();
+		return b.reset_event();		
 	}
 
 }

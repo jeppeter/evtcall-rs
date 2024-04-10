@@ -6,7 +6,7 @@ use winapi::shared::minwindef::{TRUE,FALSE,DWORD,BOOL};
 use winapi::um::errhandlingapi::{GetLastError};
 use winapi::um::handleapi::{CloseHandle};
 use winapi::um::winbase::{WAIT_OBJECT_0};
-use winapi::shared::winerror::{WAIT_TIMEOUT};
+//use winapi::shared::winerror::{WAIT_TIMEOUT};
 use std::sync::{Arc,RwLock};
 use std::error::Error;
 
@@ -19,6 +19,7 @@ use crate::consts::*;
 struct EventFdInner {
 	evt : HANDLE,
 	name :String,
+	flags : u32,
 }
 
 impl Drop for EventFdInner {
@@ -31,10 +32,11 @@ evtcall_error_class!{EventFdError}
 
 impl EventFdInner {
 	//fn new(_initval :i32,name :&str) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
-	fn new(_initval :i32,name :&str) -> Result<Arc<RwLock<Self>>,Box<dyn Error>> {
+	fn new(_initval :i32,flags :u32,name :&str) -> Result<Arc<RwLock<Self>>,Box<dyn Error>> {
 		let mut retv :Self = Self {
 			evt : NULL_HANDLE_VALUE,
 			name : format!("{}",name),
+			flags : flags,
 		};
 		let _errval :i32;
 		let _pattr :LPSECURITY_ATTRIBUTES = std::ptr::null_mut::<SECURITY_ATTRIBUTES>() as LPSECURITY_ATTRIBUTES;
@@ -72,23 +74,15 @@ impl EventFdInner {
 	}
 
 	fn is_event(&self) -> Result<bool,Box<dyn Error>> {
-		let dret :DWORD;
 		if self.evt == NULL_HANDLE_VALUE {
 			evtcall_new_error!{EventFdError,"{} not valid",self.name}
 		}
-		unsafe {
-			dret = WaitForSingleObject(self.evt,0);
+
+		let bval = self.wait_event(0);
+		if bval && (self.flags & EVENT_NO_AUTO_RESET) == 0 {
+			let _ = self.reset_event();
 		}
-		if dret == WAIT_OBJECT_0 {
-			unsafe {
-				ResetEvent(self.evt);
-			}
-			return Ok(true);
-		} else if dret == WAIT_TIMEOUT {
-			return Ok(false);
-		}
-		let erri = get_errno!();
-		evtcall_new_error!{EventFdError,"get event {} error {}",self.name,erri}
+		Ok(bval)
 	}
 
 	fn get_event(&self) -> u64 {
@@ -101,6 +95,17 @@ impl EventFdInner {
 
 	fn get_name(&self) -> String {
 		return format!("{}",self.name);
+	}
+
+	fn wait_event(&self,mills :i32) -> bool {
+		return wait_event_fd_timeout_inner(self.evt as u64,mills);
+	}
+
+	fn reset_event(&self) -> Result<(),Box<dyn Error>> {
+		unsafe {
+			ResetEvent(self.evt);
+		}
+		Ok(())
 	}
 }
 

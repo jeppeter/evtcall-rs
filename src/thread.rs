@@ -7,6 +7,7 @@ use std::error::Error;
 use std::cell::UnsafeCell;
 use std::sync::{Arc,RwLock};
 use crate::eventfd::*;
+use crate::consts::*;
 evtcall_error_class!{EvtThreadError}
 
 
@@ -18,8 +19,8 @@ struct ThreadEventInner {
 impl ThreadEventInner {
 	pub (crate) fn new() -> Result<Self,Box<dyn Error>> {
 		let retv :Self = Self {
-			exitevt : EventFd::new(0,"exit event")?,
-			noteevt : EventFd::new(0,"notice event")?,
+			exitevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"exit event")?,
+			noteevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"notice event")?,
 		};
 		Ok(retv)
 	}
@@ -89,7 +90,7 @@ pub (crate) struct EvtBody<T> {
 
 
 pub (crate) struct EvtSyncUnsafeCell<T> {
-    inner: UnsafeCell<T>,
+	inner: UnsafeCell<T>,
 }
 
 unsafe impl<T> Sync for EvtSyncUnsafeCell<T> {}
@@ -98,7 +99,7 @@ impl<T> EvtSyncUnsafeCell<T> {
     /// Constructs a new instance of `EvtSyncUnsafeCell` which will wrap the specified value.
     #[inline]
     pub (crate)  const fn new(value: T) -> Self {
-        Self { inner: UnsafeCell::new(value), }
+    	Self { inner: UnsafeCell::new(value), }
     }
 
 }
@@ -112,7 +113,7 @@ impl<T> EvtSyncUnsafeCell<T> {
     /// or mutable aliases going on when casting to `&T`
     #[inline]
     pub (crate) const fn get(&self) -> *mut T {
-        self.inner.get()
+    	self.inner.get()
     }
 }
 
@@ -236,6 +237,37 @@ impl<T : 'static> EvtThreadInner<T> {
 		}
 		return self.evts.set_notice_exit_event();
 	}
+
+	pub (crate) fn try_join(&mut self, mills :i32) -> bool {
+		if !self.started {
+			return true;
+		}
+		let mut curval :i32 = mills;
+		let hd :u64 = self.evts.get_exit_event();
+		
+		if curval < 0 {
+			/*for on second*/
+			curval = 1000;
+		}
+		loop {
+			let _ = self.evts.set_notice_exit_event();
+			let bval = wait_event_fd_timeout(hd,curval);
+			if bval {
+				break;
+			}
+			if mills >= 0 {
+				/*we try again not*/
+				return false;
+			}
+			/*now we should wait all*/			
+		}
+		if self.chld.len() > 0 {
+			let o = self.chld.pop().unwrap();
+			let _ = o.join();
+		}
+		self.started = false;
+		return true;
+	}
 }
 
 pub struct EvtThread<T> {
@@ -281,5 +313,10 @@ impl<T : 'static>  EvtThread<T> {
 	pub fn stop(&mut self) -> Result<(),Box<dyn Error>> {
 		let refm :&mut EvtThreadInner<T> = unsafe {&mut *self.inner.get()}; 
 		return refm.stop();
+	}
+
+	pub fn try_join(&mut self,mills :i32) -> bool {
+		let refm :&mut EvtThreadInner<T> = unsafe {&mut *self.inner.get()}; 
+		return refm.try_join(mills);
 	}
 }
