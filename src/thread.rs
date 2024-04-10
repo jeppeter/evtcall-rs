@@ -22,25 +22,22 @@ impl ThreadEventInner {
 			exitevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"exit event")?,
 			noteevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"notice event")?,
 		};
+		retv.exitevt.debug_self(file!(),line!());
+		retv.noteevt.debug_self(file!(),line!());
 		Ok(retv)
 	}
 
-	pub (crate) fn set_exit_event(&mut self) -> Result<(),Box<dyn Error>> {
-		self.exitevt.set_event()
+	pub (crate) fn get_exit_evtfd(&self) -> EventFd {
+		let cv = self.exitevt.clone();
+		cv.debug_self(file!(),line!());
+		cv
 	}
 
-	pub (crate) fn set_notice_exit_event(&mut self) -> Result<(),Box<dyn Error>> {
-		self.noteevt.set_event()
+	pub (crate) fn get_notice_exit_evtfd(&self) -> EventFd {
+		let cv = self.noteevt.clone();
+		cv.debug_self(file!(),line!());
+		cv
 	}
-
-	pub (crate) fn get_exit_event(&self) -> u64 {
-		self.exitevt.get_event()
-	}
-
-	pub (crate) fn get_notice_exit_event(&self) -> u64 {
-		self.noteevt.get_event()
-	}
-
 
 }
 
@@ -57,26 +54,15 @@ impl ThreadEvent {
 		Ok(retv)
 	}
 
-	pub fn set_exit_event(&mut self) -> Result<(),Box<dyn Error>> {
-		let mut cv = self.inner.write().unwrap();
-		cv.set_exit_event()
-	}
-
-	pub fn set_notice_exit_event(&mut self) -> Result<(),Box<dyn Error>> {
-		let mut cv = self.inner.write().unwrap();
-		cv.set_notice_exit_event()		
-	}
-
-	pub fn get_exit_event(&self) -> u64 {
+	pub fn get_exit_evtfd(&self) -> EventFd {
 		let cv = self.inner.read().unwrap();
-		cv.get_exit_event()
+		cv.get_exit_evtfd()
 	}
 
-	pub fn get_notice_exit_event(&self) -> u64 {
+	pub fn get_notice_exit_evtfd(&self) -> EventFd {
 		let cv = self.inner.read().unwrap();
-		cv.get_notice_exit_event()
+		cv.get_notice_exit_evtfd()
 	}
-
 }
 
 unsafe impl Send for ThreadEvent {}
@@ -166,15 +152,16 @@ impl<T> EvtThreadInner<T> {
 	pub fn close(&mut self) {
 		evtcall_log_trace!("call EvtThreadInner close");
 		if self.started {
-			let exitevt = self.evts.get_exit_event();
-			let _ = self.evts.set_notice_exit_event();
+			let exitevt : EventFd = self.evts.get_exit_evtfd();
+			let noteevt :EventFd = self.evts.get_notice_exit_evtfd();
+			let _ = noteevt.set_event();
 			let mut cnt : u64 = 0;
 			loop {
-				let bval = wait_event_fd_timeout(exitevt,10);
+				let bval = wait_event_fd_timeout(exitevt.get_event(),10);
 				if bval {
 					break;
 				}
-				let _ = self.evts.set_notice_exit_event();
+				let _ = noteevt.set_event();
 				cnt += 1;
 				if (cnt % 100) == 0 {
 					evtcall_log_error!("wait thread cnt [{}]",cnt);
@@ -204,25 +191,30 @@ impl<T : 'static> EvtThreadInner<T> {
 		if !self.started {
 			return true;
 		}
-		let exitevt = self.evts.get_exit_event();
-		let bval = wait_event_fd_timeout(exitevt,-1);
+		let exitevt = self.evts.get_exit_evtfd();
+		let bval = wait_event_fd_timeout(exitevt.get_event(),-1);
 		return bval;
 	}
 
 	pub (crate) fn start<F :  FnOnce() -> T + 'static + Send + Sync>(&mut self,ncall :F, other :Arc<EvtSyncUnsafeCell<EvtThreadInner<T>>>) -> Result<(),Box<dyn Error>> {
 		if !self.started {
 			let cother = other.clone();
+			evtcall_log_trace!("before spawn");
 			let o = std::thread::spawn(move || {
+				evtcall_log_trace!("before child call");
 				let retv = ncall();
 				let refm :&mut EvtThreadInner<T> = unsafe {&mut *cother.get()}; 
-				let _ = refm.evts.set_exit_event();				
+				let exitevt :EventFd = refm.evts.get_exit_evtfd();
+				let _ = exitevt.set_event();				
 				{					
 					refm.retval.push(retv);	
 				}
+				evtcall_log_trace!("after child call");
 				()
 			});
 			self.chld.push(o);
 			self.started = true;
+			evtcall_log_trace!("after spawn");
 		}
 		Ok(())
 	}
@@ -235,7 +227,7 @@ impl<T : 'static> EvtThreadInner<T> {
 		if !self.started {
 			return Ok(());
 		}
-		return self.evts.set_notice_exit_event();
+		return self.evts.get_notice_exit_evtfd().set_event();
 	}
 
 	pub (crate) fn try_join(&mut self, mills :i32) -> bool {
@@ -243,15 +235,16 @@ impl<T : 'static> EvtThreadInner<T> {
 			return true;
 		}
 		let mut curval :i32 = mills;
-		let hd :u64 = self.evts.get_exit_event();
+		let exitevt :EventFd = self.evts.get_exit_evtfd();
+		let noteevt :EventFd = self.evts.get_notice_exit_evtfd();
 		
 		if curval < 0 {
 			/*for on second*/
 			curval = 1000;
 		}
 		loop {
-			let _ = self.evts.set_notice_exit_event();
-			let bval = wait_event_fd_timeout(hd,curval);
+			let _ = noteevt.set_event();
+			let bval = wait_event_fd_timeout(exitevt.get_event(),curval);
 			if bval {
 				break;
 			}
