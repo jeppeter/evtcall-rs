@@ -81,7 +81,8 @@ impl EventFd {
 	pub fn reset_event(&self) -> Result<(),Box<dyn Error>> {
 		let bres = self.inner.read();
 		if bres.is_err() {
-			evtcall_new_error!{EventFdError,"{}",bres.err().unwrap()}
+			let no = bres.err();
+			return Err(no).unwrap();
 		}
 		let b = bres.unwrap();
 		return b.reset_event();		
