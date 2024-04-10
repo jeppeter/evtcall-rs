@@ -48,11 +48,18 @@ impl EventFdInner {
 			_errval = get_errno!();
 			evtcall_new_error!{EventFdError,"can not CreateEventW error {}",_errval}
 		}
+		retv.debug_self(file!(),line!());
 		Ok(Arc::new(RwLock::new(retv)))
 	}
 
+	pub fn debug_self(&self,fname :&str,line :u32) {
+		evtcall_log_trace!("[{}:{}]EventFdInner [{}]  [{:p}]",fname,line,self.name,self);
+	}
+
+
 	pub fn close(&mut self) {
-		evtcall_log_trace!("close EventFdInner");
+		self.debug_self(file!(),line!());
+		evtcall_log_trace!("close EventFdInner {:p}",self);
 		if self.evt != NULL_HANDLE_VALUE {
 			unsafe {
 				CloseHandle(self.evt);

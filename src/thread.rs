@@ -22,6 +22,8 @@ impl ThreadEventInner {
 			exitevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"exit event")?,
 			noteevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"notice event")?,
 		};
+		retv.exitevt.debug_self(file!(),line!());
+		retv.noteevt.debug_self(file!(),line!());
 		Ok(retv)
 	}
 
