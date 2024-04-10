@@ -52,8 +52,14 @@ impl EventFdInner {
 		Ok(Arc::new(RwLock::new(retv)))
 	}
 
+	#[cfg(feature="debug_mode")]
 	pub fn debug_self(&self,_fname :&str,_line :u32) {
 		evtcall_log_trace!("[{}:{}]EventFdInner [{}] [{:p}]",_fname,_line,self.name,self);
+	}
+
+	#[cfg(not(feature="debug_mode"))]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
+		return;
 	}
 
 	pub fn close(&mut self) {

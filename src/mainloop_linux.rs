@@ -12,6 +12,7 @@ use libc::{c_int};
 
 use super::{evtcall_error_class,evtcall_new_error};
 use super::*;
+#[allow(unused_imports)]
 use super::logger::*;
 
 evtcall_error_class!{MainLoopLinuxError}

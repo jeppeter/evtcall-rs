@@ -4,7 +4,7 @@ use crate::*;
 use std::error::Error;
 use std::cell::RefCell;
 
-
+#[allow(unused_imports)]
 use crate::logger::*;
 
 evtcall_error_class!{EvtChannelError}

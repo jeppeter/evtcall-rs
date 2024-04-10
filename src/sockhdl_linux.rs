@@ -2,6 +2,7 @@
 
 use crate::sockhdltype::{TcpSockType};
 use std::error::Error;
+#[allow(unused_imports)]
 use crate::logger::*;
 use crate::*;
 use crate::consts::*;

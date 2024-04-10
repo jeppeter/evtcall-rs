@@ -25,6 +25,7 @@ impl EventFd {
 		Ok(retv)
 	}
 
+	#[cfg(feature="debug_mode")]
 	pub fn debug_self(&self,_fname :&str,_line :u32) {
 		let _name :String;
 		let _cnt :usize;
@@ -34,6 +35,11 @@ impl EventFd {
 			_cnt = Arc::strong_count(&self.inner);
 		}		
 		evtcall_log_trace!("[{}:{}]EventFd [{}] cnt [{}] [{:p}]",_fname,_line,_name,_cnt,self);
+	}
+
+	#[cfg(not(feature="debug_mode"))]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
+		return;
 	}
 
 	pub fn close(&mut self) {

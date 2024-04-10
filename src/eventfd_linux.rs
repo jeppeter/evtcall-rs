@@ -1,6 +1,7 @@
 
 
 use crate::*;
+#[allow(unused_imports)]
 use crate::logger::*;
 use crate::consts::*;
 
@@ -41,9 +42,14 @@ impl EventFdInner {
 		Ok(Arc::new(RwLock::new(retv)))
 	}
 
-	
-	pub fn debug_self(&self,fname :&str,line :u32) {
-		evtcall_log_trace!("[{}:{}]EventFdInner [{}] [{:p}]",fname,line,self.name,self);
+
+	#[cfg(feature="debug_mode")]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
+		evtcall_log_trace!("[{}:{}]EventFdInner [{}] [{:p}]",_fname,_line,self.name,self);
+	}
+
+	#[cfg(not(feature="debug_mode"))]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
 	}
 
 	pub fn close(&mut self) {
