@@ -35,7 +35,7 @@ fn get_notice_signal() -> libc::sighandler_t {
 
 
 fn _get_exit_fd() -> Option<EventFd> {
-	let bres  = EventFd::new(0,"exit event");
+	let bres  = EventFd::new(0,0,"exit event");
 	if bres.is_err() {
 		return None;
 	}

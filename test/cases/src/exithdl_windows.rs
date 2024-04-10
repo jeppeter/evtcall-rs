@@ -53,7 +53,7 @@ unsafe extern "system" fn ctrl_c_handler(ty: u32) -> BOOL {
 
 
 fn _get_exit_fd() -> Option<EventFd> {
-		let bres  = EventFd::new(0,"exit event");
+		let bres  = EventFd::new(0,0,"exit event");
 		let bret :BOOL;
 		if bres.is_err() {
 			return None;

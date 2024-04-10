@@ -83,7 +83,7 @@ fn logtstthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 
 	for i in 0..thrids {
 		bname = format!("thr event {}",i);
-		let curstop :Arc<EventFd> = Arc::new(EventFd::new(0,&bname)?);
+		let curstop :Arc<EventFd> = Arc::new(EventFd::new(0,0,&bname)?);
 		namevec.push(format!("thr event {}",i));
 		stopvec.push(curstop.clone());
 		let logvar = logarg {
@@ -180,7 +180,7 @@ fn thrsharedata_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSe
 
 	for i in 0..thrids {
 		bname = format!("thr event {}",i);
-		let curstop :Arc<EventFd> = Arc::new(EventFd::new(0,&bname)?);
+		let curstop :Arc<EventFd> = Arc::new(EventFd::new(0,0,&bname)?);
 		let (tx,rx) = mpsc::channel::<i32>();
 		namevec.push(format!("thr event {}",i));
 		stopvec.push(curstop.clone());
@@ -749,10 +749,10 @@ fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetI
 	for i in 0..thrids {
 		let mut bname :String = format!("exitevt[{}]",i);
 		debug_trace!("{}",bname);
-		let exitevt :EventFd = EventFd::new(0,&bname)?;
+		let exitevt :EventFd = EventFd::new(0,0,&bname)?;
 		bname = format!("exitnotify[{}]",i);
 		debug_trace!("{}",bname);
-		let exitnotify : EventFd = EventFd::new(0,&bname)?;
+		let exitnotify : EventFd = EventFd::new(0,0,&bname)?;
 		bname = format!("threadsnd[{}]",i);
 		debug_trace!("{}",bname);
 		let thrsnd :EvtChannel<String> = EvtChannel::new(0,&bname)?;
@@ -822,6 +822,8 @@ fn thread_call_new(threvt :ThreadEvent , mills : u32) -> ThreadData {
 	return ThreadData::new(20,"hello");
 }
 
+
+
 fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {	
 	let mut parentmills : u32 = 1000;
 	let mut childmills : u32 = 900;
@@ -875,18 +877,13 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 
 	if !notwait {
 		loop {
-			if thr.is_exited() {
+			bval = thr.try_join(10);
+			if bval {
 				break;
 			}
-			if !bval {
-				bval = wait_event_fd_timeout(chldevt,10);			
-			} else {
-				std::thread::sleep(std::time::Duration::from_millis(10));
-			}
 			cnt += 1;
-
 			if (cnt % 100) == 0 {
-				debug_trace!("[{}]not exited",cnt);
+				debug_trace!("[{}] still exist", cnt);
 			}
 		}
 
@@ -899,12 +896,117 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 			}
 			std::thread::sleep(std::time::Duration::from_millis(10));
 			debug_trace!("will try again get_return");
-		}		
+		}
 	}
 	Ok(())
 }
 
-#[extargs_map_function(logtstthr_handler,thrsharedata_handler,thrchannel_handler,evtthr_handler)]
+fn thread_call_empty(threvt :ThreadEvent , mills : u32) -> () {
+	let now = Instant::now();
+	let wmills :u128 = mills as u128;
+	let mut bnotified : bool =false;
+	let noteevt : u64 = threvt.get_notice_exit_event();
+	let mut cnt : i32 = 0;
+	loop {
+		let curmills = now.elapsed().as_millis();
+		if curmills > wmills {
+			break;
+		}
+
+		if !bnotified {
+			bnotified = wait_event_fd_timeout(noteevt,10);			
+		} else {
+			std::thread::sleep(std::time::Duration::from_millis(10));
+		}
+
+		cnt += 1;
+
+		if (cnt % 100) == 0 {
+			debug_trace!("[{}]bnotified [{}]",cnt,bnotified);
+		}
+	}
+
+	return ();
+}
+
+fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {	
+	let mut parentmills : u32 = 1000;
+	let mut childmills : u32 = 900;
+	let sarr :Vec<String>;
+	let  mut evt :ThreadEvent = ThreadEvent::new().unwrap();
+	let mut notwait :bool = false;
+
+	init_log(ns.clone())?;
+	sarr = ns.get_array("subnargs");
+	if sarr.len() > 0 {
+		parentmills = parse_u64(&sarr[0])? as u32;
+	}
+
+	if sarr.len() > 1 {
+		childmills = parse_u64(&sarr[1])? as u32;
+	}
+
+	if sarr.len() > 2 {
+		notwait = true;
+	}
+
+	let mut thr :EvtThread<()> = EvtThread::new(evt.clone())?;
+	let oevt = evt.clone();
+	thr.start(move || {
+		return thread_call_empty(oevt,childmills);
+	})?;
+	let chldevt :u64 = evt.get_exit_event();
+	let now :Instant = Instant::now();
+	let wmills : u128 = parentmills as u128;
+	let mut bval : bool = false;
+	let mut cnt : i32 = 0;
+	loop {
+		let curmills = now.elapsed().as_millis();
+		if curmills > wmills {
+			break;
+		}
+		if !bval {
+			bval = wait_event_fd_timeout(chldevt,10);			
+		} else {
+			std::thread::sleep(std::time::Duration::from_millis(10));
+		}
+
+		cnt += 1;
+
+		if (cnt % 100) == 0 {
+			debug_trace!("[{}]bval [{}]",cnt,bval);
+		}
+	}
+
+	let _ = evt.set_notice_exit_event();
+
+	if !notwait {
+		loop {
+			bval = thr.try_join(10);
+			if bval {
+				break;
+			}
+			cnt += 1;
+			if (cnt % 100) == 0 {
+				debug_trace!("[{}] still exist", cnt);
+			}
+		}
+
+		loop {
+			let cdata :Option<()> = thr.get_return();
+			if cdata.is_some() {
+				debug_trace!("get cdata");
+				break;
+			}
+			std::thread::sleep(std::time::Duration::from_millis(10));
+			debug_trace!("will try again get_return");
+		}
+	}
+	Ok(())
+}
+
+
+#[extargs_map_function(logtstthr_handler,thrsharedata_handler,thrchannel_handler,evtthr_handler,evtthrempty_handler)]
 pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 	let cmdline = r#"
 	{
@@ -918,6 +1020,9 @@ pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 			"$" : "*"
 		},
 		"evtthr<evtthr_handler>##[parenttime] [childtime] to make evtthr default parenttime 1000 childtime 900 milliseconds##" : {
+			"$" : "*"
+		},
+		"evtthrempty<evtthrempty_handler>##[parenttime] [childtime] to make evtthr default parenttime 1000 childtime 900 milliseconds##" : {
 			"$" : "*"
 		}
 	}

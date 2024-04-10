@@ -68,12 +68,10 @@ impl EventFdInner {
 	}
 
 	fn is_event(&self) -> Result<bool,Box<dyn Error>> {
-		let mut reti :i32;
 		if self.evt  < 0 {
 			evtcall_new_error!{EventFdError,"{} not valid",self.name}
 		}
-		let mut val :libc::eventfd_t = 0;
-		let bval = wait_event_fd_timeout_inner(self.evt,0);
+		let bval = wait_event_fd_timeout_inner(self.evt as u64,0);
 		if bval &&  (self.flags & EVENT_NO_AUTO_RESET) == 0 {
 			let _ = self.reset_event();
 		}
@@ -93,12 +91,12 @@ impl EventFdInner {
 	}
 
 	fn wait_event(&self,mills :i32) -> bool {
-		return wait_event_fd_timeout_inner(self.evt,mills);
+		return wait_event_fd_timeout_inner(self.evt as u64,mills);
 	}
 
 	fn reset_event(&self) -> Result<(),Box<dyn Error>> {
 		let reti :i32;
-		let val : libc::eventfd_t = 1;
+		let mut val : libc::eventfd_t = 1;
 		unsafe {
 			let _ptr = &mut val;
 			reti = libc::eventfd_read(self.evt,_ptr);
