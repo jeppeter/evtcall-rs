@@ -11,6 +11,7 @@ use std::sync::{Arc,RwLock};
 use std::error::Error;
 
 use crate::*;
+#[allow(unused_imports)]
 use crate::logger::*;
 use crate::consts_windows::*;
 use crate::consts::*;
@@ -48,18 +49,22 @@ impl EventFdInner {
 			_errval = get_errno!();
 			evtcall_new_error!{EventFdError,"can not CreateEventW error {}",_errval}
 		}
-		retv.debug_self(file!(),line!());
 		Ok(Arc::new(RwLock::new(retv)))
 	}
 
-	pub fn debug_self(&self,fname :&str,line :u32) {
-		evtcall_log_trace!("[{}:{}]EventFdInner [{}]  [{:p}]",fname,line,self.name,self);
+	#[cfg(feature="debug_mode")]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
+		evtcall_log_trace!("[{}:{}]EventFdInner [{}] [{:p}]",_fname,_line,self.name,self);
 	}
 
+	#[cfg(not(feature="debug_mode"))]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
+		return;
+	}
 
 	pub fn close(&mut self) {
 		self.debug_self(file!(),line!());
-		evtcall_log_trace!("close EventFdInner {:p}",self);
+		evtcall_log_trace!("close EventFdInner");
 		if self.evt != NULL_HANDLE_VALUE {
 			unsafe {
 				CloseHandle(self.evt);

@@ -794,11 +794,10 @@ impl ThreadData {
 	}
 }
 
-fn thread_call_new(threvt :ThreadEvent , mills : u32) -> ThreadData {
+fn thread_call_new(noteevt :EventFd,_exitevt :EventFd , mills : u32) -> ThreadData {
 	let now = Instant::now();
 	let wmills :u128 = mills as u128;
 	let mut bnotified : bool =false;
-	let noteevt : u64 = threvt.get_notice_exit_event();
 	let mut cnt : i32 = 0;
 	loop {
 		let curmills = now.elapsed().as_millis();
@@ -807,7 +806,7 @@ fn thread_call_new(threvt :ThreadEvent , mills : u32) -> ThreadData {
 		}
 
 		if !bnotified {
-			bnotified = wait_event_fd_timeout(noteevt,10);			
+			bnotified = wait_event_fd_timeout(noteevt.get_event(),10);			
 		} else {
 			std::thread::sleep(std::time::Duration::from_millis(10));
 		}
@@ -828,7 +827,7 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 	let mut parentmills : u32 = 1000;
 	let mut childmills : u32 = 900;
 	let sarr :Vec<String>;
-	let  mut evt :ThreadEvent = ThreadEvent::new().unwrap();
+	let  evt :ThreadEvent = ThreadEvent::new().unwrap();
 	let mut notwait :bool = false;
 
 	init_log(ns.clone())?;
@@ -846,22 +845,24 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 	}
 
 	let mut thr :EvtThread<ThreadData> = EvtThread::new(evt.clone())?;
-	let oevt = evt.clone();
+	let oevt = evt.get_notice_exit_evtfd();
+	let eevt = evt.get_exit_evtfd();
 	thr.start(move || {
-		return thread_call_new(oevt,childmills);
+		return thread_call_new(oevt,eevt,childmills);
 	})?;
-	let chldevt :u64 = evt.get_exit_event();
 	let now :Instant = Instant::now();
 	let wmills : u128 = parentmills as u128;
 	let mut bval : bool = false;
 	let mut cnt : i32 = 0;
+	let chldevt :EventFd = evt.get_exit_evtfd();
+	let noteevt :EventFd = evt.get_notice_exit_evtfd();
 	loop {
 		let curmills = now.elapsed().as_millis();
 		if curmills > wmills {
 			break;
 		}
 		if !bval {
-			bval = wait_event_fd_timeout(chldevt,10);			
+			bval = wait_event_fd_timeout(chldevt.get_event(),10);			
 		} else {
 			std::thread::sleep(std::time::Duration::from_millis(10));
 		}
@@ -873,7 +874,7 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 		}
 	}
 
-	let _ = evt.set_notice_exit_event();
+	let _ = noteevt.set_event();
 
 	if !notwait {
 		loop {
@@ -901,11 +902,10 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 	Ok(())
 }
 
-fn thread_call_empty(threvt :ThreadEvent , mills : u32) -> () {
+fn thread_call_empty(noteevt :EventFd, _exitevt :EventFd , mills : u32) -> () {
 	let now = Instant::now();
 	let wmills :u128 = mills as u128;
 	let mut bnotified : bool =false;
-	let noteevt : u64 = threvt.get_notice_exit_event();
 	let mut cnt : i32 = 0;
 	loop {
 		let curmills = now.elapsed().as_millis();
@@ -914,7 +914,7 @@ fn thread_call_empty(threvt :ThreadEvent , mills : u32) -> () {
 		}
 
 		if !bnotified {
-			bnotified = wait_event_fd_timeout(noteevt,10);			
+			bnotified = wait_event_fd_timeout(noteevt.get_event(),10);			
 		} else {
 			std::thread::sleep(std::time::Duration::from_millis(10));
 		}
@@ -933,7 +933,7 @@ fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSet
 	let mut parentmills : u32 = 1000;
 	let mut childmills : u32 = 900;
 	let sarr :Vec<String>;
-	let  mut evt :ThreadEvent = ThreadEvent::new().unwrap();
+	let evt :ThreadEvent = ThreadEvent::new().unwrap();
 	let mut notwait :bool = false;
 
 	init_log(ns.clone())?;
@@ -951,11 +951,13 @@ fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSet
 	}
 
 	let mut thr :EvtThread<()> = EvtThread::new(evt.clone())?;
-	let oevt = evt.clone();
+	let oevt = evt.get_notice_exit_evtfd();
+	let eevt = evt.get_exit_evtfd();
 	thr.start(move || {
-		return thread_call_empty(oevt,childmills);
+		return thread_call_empty(oevt,eevt,childmills);
 	})?;
-	let chldevt :u64 = evt.get_exit_event();
+	let chldevt :EventFd = evt.get_exit_evtfd();
+	let noteevt :EventFd = evt.get_notice_exit_evtfd();
 	let now :Instant = Instant::now();
 	let wmills : u128 = parentmills as u128;
 	let mut bval : bool = false;
@@ -966,7 +968,7 @@ fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSet
 			break;
 		}
 		if !bval {
-			bval = wait_event_fd_timeout(chldevt,10);			
+			bval = wait_event_fd_timeout(chldevt.get_event(),10);			
 		} else {
 			std::thread::sleep(std::time::Duration::from_millis(10));
 		}
@@ -978,7 +980,7 @@ fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSet
 		}
 	}
 
-	let _ = evt.set_notice_exit_event();
+	let _ = noteevt.set_event();
 
 	if !notwait {
 		loop {

@@ -25,20 +25,26 @@ impl EventFd {
 		Ok(retv)
 	}
 
-	pub fn debug_self(&self,fname :&str,line :u32) {
-		let name :String;
-		let cnt :usize;
+	#[cfg(feature="debug_mode")]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
+		let _name :String;
+		let _cnt :usize;
 		{
 			let cv = self.inner.read().unwrap();
-			name = cv.get_name();
-			cnt = Arc::strong_count(&self.inner);
+			_name = cv.get_name();
+			_cnt = Arc::strong_count(&self.inner);
 		}		
-		evtcall_log_trace!("[{}:{}]EventFd [{}] cnt [{}] [{:p}]",fname,line,name,cnt,self);
+		evtcall_log_trace!("[{}:{}]EventFd [{}] cnt [{}] [{:p}]",_fname,_line,_name,_cnt,self);
 	}
 
-	pub fn close(&mut self) {		
+	#[cfg(not(feature="debug_mode"))]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
+		return;
+	}
+
+	pub fn close(&mut self) {
 		self.debug_self(file!(),line!());
-		evtcall_log_trace!("close EventFd {:p}",self);
+		evtcall_log_trace!("close EventFd [{:p}]",self);
 	}
 
 	pub fn is_event(&self) -> Result<bool,Box<dyn Error>> {

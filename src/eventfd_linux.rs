@@ -1,6 +1,7 @@
 
 
 use crate::*;
+#[allow(unused_imports)]
 use crate::logger::*;
 use crate::consts::*;
 
@@ -38,17 +39,22 @@ impl EventFdInner {
 			let erri = get_errno!();
 			evtcall_new_error!{EventFdError,"can not init {} error {}",name,erri}
 		}
-		retv.debug_self(file!(),line!());
 		Ok(Arc::new(RwLock::new(retv)))
 	}
 
-	pub fn debug_self(&self,fname :&str,line :u32) {
-		evtcall_log_trace!("[{}:{}]EventFdInner [{}]  [{:p}]",fname,line,self.name,self);
+
+	#[cfg(feature="debug_mode")]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
+		evtcall_log_trace!("[{}:{}]EventFdInner [{}] [{:p}]",_fname,_line,self.name,self);
+	}
+
+	#[cfg(not(feature="debug_mode"))]
+	pub fn debug_self(&self,_fname :&str,_line :u32) {
 	}
 
 	pub fn close(&mut self) {
 		self.debug_self(file!(),line!());
-		evtcall_log_trace!("close EventFdInner {:p}",self);
+		evtcall_log_trace!("close EventFdInner");
 		if self.evt >= 0 {
 			unsafe {
 				libc::close(self.evt);
