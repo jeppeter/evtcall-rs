@@ -13,29 +13,29 @@ evtcall_error_class!{EvtThreadError}
 
 
 struct ThreadEventInner {
-	exitevt : EventFd,
-	noteevt : EventFd,
+	chldevt : EventFd,
+	parentevt : EventFd,
 }
 
 impl ThreadEventInner {
 	pub (crate) fn new() -> Result<Self,Box<dyn Error>> {
 		let retv :Self = Self {
-			exitevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"exit event")?,
-			noteevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"notice event")?,
+			chldevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"child event")?,
+			parentevt : EventFd::new(0,EVENT_NO_AUTO_RESET,"parent event")?,
 		};
-		retv.exitevt.debug_self(file!(),line!());
-		retv.noteevt.debug_self(file!(),line!());
+		retv.chldevt.debug_self(file!(),line!());
+		retv.parentevt.debug_self(file!(),line!());
 		Ok(retv)
 	}
 
-	pub (crate) fn get_exit_evtfd(&self) -> EventFd {
-		let cv = self.exitevt.clone();
+	pub (crate) fn get_child_evtfd(&self) -> EventFd {
+		let cv = self.chldevt.clone();
 		cv.debug_self(file!(),line!());
 		cv
 	}
 
-	pub (crate) fn get_notice_exit_evtfd(&self) -> EventFd {
-		let cv = self.noteevt.clone();
+	pub (crate) fn get_parent_evtfd(&self) -> EventFd {
+		let cv = self.parentevt.clone();
 		cv.debug_self(file!(),line!());
 		cv
 	}
@@ -55,14 +55,14 @@ impl ThreadEvent {
 		Ok(retv)
 	}
 
-	pub fn get_exit_evtfd(&self) -> EventFd {
+	pub fn get_child_evtfd(&self) -> EventFd {
 		let cv = self.inner.read().unwrap();
-		cv.get_exit_evtfd()
+		cv.get_child_evtfd()
 	}
 
-	pub fn get_notice_exit_evtfd(&self) -> EventFd {
+	pub fn get_parent_evtfd(&self) -> EventFd {
 		let cv = self.inner.read().unwrap();
-		cv.get_notice_exit_evtfd()
+		cv.get_parent_evtfd()
 	}
 }
 
@@ -153,16 +153,16 @@ impl<T> EvtThreadInner<T> {
 	pub fn close(&mut self) {
 		evtcall_log_trace!("call EvtThreadInner close");
 		if self.started {
-			let exitevt : EventFd = self.evts.get_exit_evtfd();
-			let noteevt :EventFd = self.evts.get_notice_exit_evtfd();
-			let _ = noteevt.set_event();
+			let chldevt : EventFd = self.evts.get_child_evtfd();
+			let parentevt :EventFd = self.evts.get_parent_evtfd();
+			let _ = parentevt.set_event();
 			let mut cnt : u64 = 0;
 			loop {
-				let bval = wait_event_fd_timeout(exitevt.get_event(),10);
+				let bval = wait_event_fd_timeout(chldevt.get_event(),10);
 				if bval {
 					break;
 				}
-				let _ = noteevt.set_event();
+				let _ = parentevt.set_event();
 				cnt += 1;
 				if (cnt % 100) == 0 {
 					evtcall_log_error!("wait thread cnt [{}]",cnt);
@@ -192,8 +192,8 @@ impl<T : 'static> EvtThreadInner<T> {
 		if !self.started {
 			return true;
 		}
-		let exitevt = self.evts.get_exit_evtfd();
-		let bval = wait_event_fd_timeout(exitevt.get_event(),-1);
+		let chldevt = self.evts.get_child_evtfd();
+		let bval = wait_event_fd_timeout(chldevt.get_event(),-1);
 		return bval;
 	}
 
@@ -205,8 +205,8 @@ impl<T : 'static> EvtThreadInner<T> {
 				evtcall_log_trace!("before child call");
 				let retv = ncall();
 				let refm :&mut EvtThreadInner<T> = unsafe {&mut *cother.get()}; 
-				let exitevt :EventFd = refm.evts.get_exit_evtfd();
-				let _ = exitevt.set_event();				
+				let chldevt :EventFd = refm.evts.get_child_evtfd();
+				let _ = chldevt.set_event();				
 				{					
 					refm.retval.push(retv);	
 				}
@@ -228,7 +228,7 @@ impl<T : 'static> EvtThreadInner<T> {
 		if !self.started {
 			return Ok(());
 		}
-		return self.evts.get_notice_exit_evtfd().set_event();
+		return self.evts.get_parent_evtfd().set_event();
 	}
 
 	pub (crate) fn try_join(&mut self, mills :i32) -> bool {
@@ -236,16 +236,16 @@ impl<T : 'static> EvtThreadInner<T> {
 			return true;
 		}
 		let mut curval :i32 = mills;
-		let exitevt :EventFd = self.evts.get_exit_evtfd();
-		let noteevt :EventFd = self.evts.get_notice_exit_evtfd();
+		let chldevt :EventFd = self.evts.get_child_evtfd();
+		let parentevt :EventFd = self.evts.get_parent_evtfd();
 		
 		if curval < 0 {
 			/*for on second*/
 			curval = 1000;
 		}
 		loop {
-			let _ = noteevt.set_event();
-			let bval = wait_event_fd_timeout(exitevt.get_event(),curval);
+			let _ = parentevt.set_event();
+			let bval = wait_event_fd_timeout(chldevt.get_event(),curval);
 			if bval {
 				break;
 			}

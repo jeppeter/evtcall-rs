@@ -845,17 +845,17 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 	}
 
 	let mut thr :EvtThread<ThreadData> = EvtThread::new(evt.clone())?;
-	let oevt = evt.get_notice_exit_evtfd();
-	let eevt = evt.get_exit_evtfd();
+	let pevt = evt.get_parent_evtfd();
+	let cevt = evt.get_child_evtfd();
 	thr.start(move || {
-		return thread_call_new(oevt,eevt,childmills);
+		return thread_call_new(pevt,cevt,childmills);
 	})?;
 	let now :Instant = Instant::now();
 	let wmills : u128 = parentmills as u128;
 	let mut bval : bool = false;
 	let mut cnt : i32 = 0;
-	let chldevt :EventFd = evt.get_exit_evtfd();
-	let noteevt :EventFd = evt.get_notice_exit_evtfd();
+	let chldevt :EventFd = evt.get_child_evtfd();
+	let parentevt :EventFd = evt.get_parent_evtfd();
 	loop {
 		let curmills = now.elapsed().as_millis();
 		if curmills > wmills {
@@ -874,7 +874,7 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 		}
 	}
 
-	let _ = noteevt.set_event();
+	let _ = parentevt.set_event();
 
 	if !notwait {
 		loop {
@@ -951,13 +951,13 @@ fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSet
 	}
 
 	let mut thr :EvtThread<()> = EvtThread::new(evt.clone())?;
-	let oevt = evt.get_notice_exit_evtfd();
-	let eevt = evt.get_exit_evtfd();
+	let pevt = evt.get_parent_evtfd();
+	let cevt = evt.get_child_evtfd();
 	thr.start(move || {
-		return thread_call_empty(oevt,eevt,childmills);
+		return thread_call_empty(pevt,cevt,childmills);
 	})?;
-	let chldevt :EventFd = evt.get_exit_evtfd();
-	let noteevt :EventFd = evt.get_notice_exit_evtfd();
+	let chldevt :EventFd = evt.get_child_evtfd();
+	let parentevt :EventFd = evt.get_parent_evtfd();
 	let now :Instant = Instant::now();
 	let wmills : u128 = parentmills as u128;
 	let mut bval : bool = false;
@@ -980,7 +980,7 @@ fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSet
 		}
 	}
 
-	let _ = noteevt.set_event();
+	let _ = parentevt.set_event();
 
 	if !notwait {
 		loop {
