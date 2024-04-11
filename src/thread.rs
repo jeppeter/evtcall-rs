@@ -264,6 +264,7 @@ impl<T : 'static> EvtThreadInner<T> {
 	}
 }
 
+#[derive(Clone)]
 pub struct EvtThread<T> {
 	inner : Arc<EvtSyncUnsafeCell<EvtThreadInner<T>>>,
 }

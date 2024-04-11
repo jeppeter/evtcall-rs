@@ -34,6 +34,7 @@ use evtcall::eventfd::*;
 use evtcall::mainloop::*;
 use evtcall::thread::{EvtThread,ThreadEvent};
 use evtcall::channel::*;
+use evtcall::defer::{DeferCall};
 use rand::prelude::*;
 
 extargs_error_class!{ThrHdlError}
@@ -780,6 +781,7 @@ fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetI
 	Ok(())
 }
 
+#[derive(Clone)]
 struct ThreadData {
 	pub val : i32,
 	pub vals :String,
@@ -829,6 +831,7 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 	let sarr :Vec<String>;
 	let  evt :ThreadEvent = ThreadEvent::new().unwrap();
 	let mut notwait :bool = false;
+	let mut defercall :DeferCall = DeferCall::new();
 
 	init_log(ns.clone())?;
 	sarr = ns.get_array("subnargs");
@@ -847,6 +850,16 @@ fn evtthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>
 	let mut thr :EvtThread<ThreadData> = EvtThread::new(evt.clone())?;
 	let pevt = evt.get_parent_evtfd();
 	let cevt = evt.get_child_evtfd();
+	let mut nthr = thr.clone();
+	defercall.push_call(move || {
+		loop {
+			let cval = nthr.try_join(10);
+			if cval {
+				debug_trace!("call defer cval");
+				break;
+			}
+		}
+	});
 	thr.start(move || {
 		return thread_call_new(pevt,cevt,childmills);
 	})?;
@@ -953,6 +966,17 @@ fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSet
 	let mut thr :EvtThread<()> = EvtThread::new(evt.clone())?;
 	let pevt = evt.get_parent_evtfd();
 	let cevt = evt.get_child_evtfd();
+	let mut nthr = thr.clone();
+	let mut defercall :DeferCall = DeferCall::new();
+	defercall.push_call(move || {
+		loop {
+			let cval = nthr.try_join(10);
+			if cval {
+				debug_trace!("defercall empty cval");
+				break;
+			}
+		}
+	});
 	thr.start(move || {
 		return thread_call_empty(pevt,cevt,childmills);
 	})?;
@@ -1004,6 +1028,7 @@ fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSet
 			debug_trace!("will try again get_return");
 		}
 	}
+	debug_trace!("main empty will exit");
 	Ok(())
 }
 
