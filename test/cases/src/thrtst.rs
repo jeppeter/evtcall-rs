@@ -1033,7 +1033,22 @@ fn evtthrempty_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSet
 }
 
 
-#[extargs_map_function(logtstthr_handler,thrsharedata_handler,thrchannel_handler,evtthr_handler,evtthrempty_handler)]
+fn defertest_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetImpl>>>,_ctx :Option<Arc<RefCell<dyn Any>>>) -> Result<(),Box<dyn Error>> {	
+	init_log(ns.clone())?;
+	let mut defercall :DeferCall = DeferCall::new();
+	defercall.push_call(move || {
+		debug_trace!("call first");
+	});
+	defercall.push_call(move || {
+		debug_trace!("call second");
+	});
+	defercall.push_call(move || {
+		debug_trace!("call third");
+	});
+	Ok(())
+}
+
+#[extargs_map_function(logtstthr_handler,thrsharedata_handler,thrchannel_handler,evtthr_handler,evtthrempty_handler,defertest_handler)]
 pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 	let cmdline = r#"
 	{
@@ -1051,6 +1066,9 @@ pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 		},
 		"evtthrempty<evtthrempty_handler>##[parenttime] [childtime] to make evtthr default parenttime 1000 childtime 900 milliseconds##" : {
 			"$" : "*"
+		},
+		"defertest<defertest_handler>##to test defercall##" : {
+			"$" : 0
 		}
 	}
 	"#;
