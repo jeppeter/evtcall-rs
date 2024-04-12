@@ -2,8 +2,12 @@
 use std::error::Error;
 use extargsparse_worker::{extargs_error_class,extargs_new_error};
 use evtcall::eventfd::*;
+use super::exithdl_consts::{SIG_TERM,SIG_INT};
+use evtcall::consts::*;
 
-use lazy_static::lazy_static;
+use extlog::{debug_trace,format_str_log};
+use extlog::loglib::{log_get_timestamp,log_output_function};
+//use lazy_static::lazy_static;
 
 extargs_error_class!{SigHdlError}
 
@@ -19,6 +23,7 @@ static mut EXIT_EVENTFD :Option<EventFd> = None;
 unsafe fn rust_signal(_iv :libc::c_int) {
 	if  EXIT_EVENTFD.is_some() {
 		let r :EventFd = EXIT_EVENTFD.as_ref().unwrap().clone();
+		debug_trace!("signaled");
 		let _ = r.set_event();
 	}
 	return;
