@@ -31,6 +31,7 @@ use std::collections::HashMap;
 mod logtrans;
 mod strop;
 mod fileop;
+mod exithdl_consts;
 mod exithdl;
 mod evttcphdl;
 mod thrtst;

@@ -11,12 +11,12 @@ extargs_error_class!{SigHdlError}
 //static ST_SIGINITED :AtomicU16 = AtomicU16::new(0);
 
 
-lazy_static !{
-	static ref EXIT_EVENTFD :Option<EventFd> = _get_exit_fd();
-}
+//lazy_static !{
+static mut EXIT_EVENTFD :Option<EventFd> = None;
+//}
 
 
-fn rust_signal(_iv :libc::c_int) {
+unsafe fn rust_signal(_iv :libc::c_int) {
 	if  EXIT_EVENTFD.is_some() {
 		let r :EventFd = EXIT_EVENTFD.as_ref().unwrap().clone();
 		let _ = r.set_event();
@@ -33,30 +33,53 @@ fn get_notice_signal() -> libc::sighandler_t {
 	notice_signal as *mut libc::c_void as libc::sighandler_t
 }
 
+fn _trans_exit_value(sigv :u32) -> libc::c_int {
+	let mut retv :libc::c_int = -1;
 
-fn _get_exit_fd() -> Option<EventFd> {
+	if sigv == SIG_TERM {
+		retv = libc::SIGTERM;
+	} else if sigv == SIG_INT {
+		retv = libc::SIGINT;
+	}
+
+	return retv;
+}
+
+
+fn _get_exit_fd(sigs :Vec<u32>) -> Option<EventFd> {
 	let bres  = EventFd::new(0,0,"exit event");
 	if bres.is_err() {
 		return None;
 	}
 
-	let sigret :libc::sighandler_t;
-	unsafe {
-		sigret = libc::signal(libc::SIGINT,get_notice_signal());
+	for v in sigs {
+		let reti = _trans_exit_value(v);
+		if reti >= 0 {
+			let sigret :libc::sighandler_t;
+			unsafe {
+				sigret = libc::signal(reti,get_notice_signal());
+			}
+			if sigret == libc::SIG_ERR {
+				return None;
+			}
+		}
 	}
-	if sigret == libc::SIG_ERR {
-		return None;
-	}
+
 	Some(bres.unwrap())
 }
 
 
-pub fn init_exit_handle() -> Result<u64,Box<dyn Error>> {
-	let retv :u64;
-	if EXIT_EVENTFD.is_some() {
-		let b =  EXIT_EVENTFD.as_ref().unwrap().clone();
-		retv = b.get_event();
-	} else {
+pub fn init_exit_handle(sigs :Vec<u32>) -> Result<u64,Box<dyn Error>> {
+	let mut retv :u64 = INVALID_EVENT_HANDLE;
+	let mut ok :bool = false;
+	unsafe {
+		EXIT_EVENTFD = _get_exit_fd(sigs);
+		if EXIT_EVENTFD.is_some() {
+			retv = EXIT_EVENTFD.as_ref().unwrap().get_event();
+			ok = true;
+		}
+	}
+	if !ok {
 		extargs_new_error!{SigHdlError,"not init exit event"}
 	}
 	Ok(retv)

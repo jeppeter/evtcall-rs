@@ -36,6 +36,7 @@ use std::io::{Write};
 use super::logtrans::{init_log};
 
 use super::exithdl::*;
+use super::exithdl_consts::*;
 
 extargs_error_class!{EvtChatError}
 
@@ -67,7 +68,8 @@ fn evchatcli_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	}
 
 	let _ = init_socket()?;
-	exithd = init_exit_handle()?;
+	let sigv :Vec<u32> = vec![SIG_INT,SIG_TERM];
+	exithd = init_exit_handle(sigv)?;
 	evcli = EvtChatClient::connect_client(&ipaddr,port,5000,exithd,&mut evtmain)?;
 	debug_trace!(" ");
 	let _ = evtmain.main_loop()?;
@@ -101,7 +103,8 @@ fn evchatsvr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	}
 
 	let _ = init_socket()?;
-	exithd = init_exit_handle()?;
+	let sigv :Vec<u32> = vec![SIG_INT,SIG_TERM];
+	exithd = init_exit_handle(sigv)?;
 	evsvr = EvtChatServer::bind_server(&ipaddr,port,5,exithd,&mut evtmain)?;
 	evsvr.debug_mode(file!(),line!());
 	let _ = evtmain.main_loop()?;	
