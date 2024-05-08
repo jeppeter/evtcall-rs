@@ -45,15 +45,14 @@ struct TimerTestInner {
 	mills : i32,
 	cnt : i32,
 	times : i32,
+	exithd : u64,
+	insertexit : bool,
 	evtmain : *mut EvtMain,
 }
 
 #[derive(Clone)]
 struct TimerTest {
 	inner : Arc<UnsafeCell<TimerTestInner>>,
-	insertexit : bool,
-	exithd : u64,
-	evtmain : *mut EvtMain,
 }
 
 impl Drop for TimerTestInner {
@@ -68,6 +67,12 @@ impl TimerTestInner {
 	}
 
 	fn close_inner(&mut self) {
+		if self.insertexit {
+			unsafe {
+				(*self.evtmain).remove_event(self.exithd);
+			}
+			self.insertexit = false;
+		}
 		self.close_timer();
 	}
 
@@ -81,17 +86,26 @@ impl TimerTestInner {
 		}		
 	}
 
-	fn new(mills :i32, times :i32,evmain :*mut EvtMain) -> Result<Self,Box<dyn Error>> {
+	fn new(mills :i32, times :i32,exithd :u64,evmain :*mut EvtMain) -> Result<Self,Box<dyn Error>> {
 		Ok(Self {
 			timerguid : 0,
 			mills : mills,
 			cnt : 0,
+			exithd : exithd,
+			insertexit : false,
 			times : times,
 			evtmain : evmain,
 		})
 	}
 
 	fn add_child_timer(&mut self, parent :TimerTest) -> Result<(),Box<dyn Error>> {
+		if !self.insertexit {
+			unsafe {
+				(*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.exithd,READ_EVENT)?;
+			}
+			self.insertexit = true;
+		}
+
 		if self.timerguid == 0 {
 			unsafe {
 				self.timerguid = (*self.evtmain).add_timer(Arc::new(RefCell::new(parent)),self.mills,false)?;
@@ -125,6 +139,19 @@ impl TimerTestInner {
 		}
 		Ok(())
 	}
+
+	fn handle_event(&mut self, evthd :u64,_evttype :u32, _parent :TimerTest) -> Result<(),Box<dyn Error>> {
+		debug_trace!("evthd {} handle",evthd);
+		if evthd == self.exithd {
+			debug_error!("exit notify event");
+			unsafe {
+				(*self.evtmain).break_up()?;
+			}
+		} else {
+			debug_error!("not accept ");
+		}
+		Ok(())
+	}
 }
 
 impl Drop for TimerTest {
@@ -135,34 +162,19 @@ impl Drop for TimerTest {
 
 impl TimerTest {
 	fn close(&mut self) {
+		debug_trace!("close TimerTest");
 		self.close_inner();
 	}
 
 	fn close_inner(&mut self) {
-		if self.insertexit {
-			unsafe {
-				(*self.evtmain).remove_event(self.exithd);
-			}
-			self.insertexit = false;
-		}
-
 		return;
 	}
 
 
 	fn new(mills :i32, times :i32,exithd :u64, evmain :*mut EvtMain) -> Result<Self,Box<dyn Error>> {
-		let mut retv :Self = Self {
-			inner : Arc::new(UnsafeCell::new(TimerTestInner::new(mills,times,evmain)?)),
-			insertexit : false,
-			exithd : exithd,
-			evtmain : evmain,
+		let retv :Self = Self {
+			inner : Arc::new(UnsafeCell::new(TimerTestInner::new(mills,times,exithd,evmain)?)),
 		};
-		if !retv.insertexit {
-			unsafe {
-				let _ = (*retv.evtmain).add_event(Arc::new(RefCell::new(retv.clone())),retv.exithd,READ_EVENT)?;
-			}
-			retv.insertexit = true;
-		}
 
 		let s1 :&mut TimerTestInner = unsafe {&mut *retv.inner.get()};
 		s1.add_child_timer(retv.clone())?;
@@ -176,13 +188,8 @@ impl EvtCall for TimerTest {
 	}
 
 	fn handle(&mut self,evthd :u64, _evttype :u32,_evtmain :&mut EvtMain) -> Result<(),Box<dyn Error>> {
-		if evthd == self.exithd {
-			debug_error!("exit notify event");
-			_evtmain.break_up()?;
-		} else {
-			debug_error!("not accept ");
-		}
-		Ok(())
+		let s1 :&mut TimerTestInner = unsafe {&mut *self.inner.get()};
+		return s1.handle_event(evthd,_evttype,self.clone());
 	}
 
 	fn close_event(&mut self,_evthd :u64, _evttype :u32,_evtmain :&mut EvtMain) {
