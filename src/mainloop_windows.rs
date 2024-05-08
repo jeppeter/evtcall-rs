@@ -261,6 +261,7 @@ impl EvtMain {
 				if findtv.is_some() {
 					let c = findtv.unwrap();
 					let b = c.timer.clone();
+					evtcall_log_trace!("before call timer {}",*g);
 					b.borrow_mut().timer(*g,self)?;
 
 					if c.conti {
@@ -271,6 +272,7 @@ impl EvtMain {
 							None => {}
 						}
 					} else {
+						evtcall_log_trace!("remove g {}",*g);
 						self.timermaps.remove(g);
 					}
 				}

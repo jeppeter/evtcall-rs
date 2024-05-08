@@ -35,6 +35,7 @@ mod exithdl_consts;
 mod exithdl;
 mod evttcphdl;
 mod thrtst;
+mod timertst;
 
 
 #[extargs_map_function()]
@@ -50,6 +51,7 @@ fn main() -> Result<(),Box<dyn Error>> {
 	logtrans::prepare_log(parser.clone())?;
 	evttcphdl::load_evchat_handler(parser.clone())?;
 	thrtst::load_thread_handler(parser.clone())?;
+	timertst::load_timertst_handler(parser.clone())?;
 	let ores = parser.parse_commandline_ex(None,None,None,None);
 	if ores.is_err() {
 		let e = ores.err().unwrap();
