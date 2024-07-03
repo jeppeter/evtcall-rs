@@ -18,7 +18,7 @@ impl<T : std::marker::Send + 'static > Drop for EvtChannel<T> {
 
 impl<T : std::marker::Send + 'static > EvtChannel<T> {
 	pub fn close(&mut self) {
-		evtcall_log_trace!("close EvtChannel");
+		evtcall_log_trace!("close EvtChannel [{}]",self.get_name());
 	}
 
 	pub fn new(maxsize :usize, s :&str) -> Result<Self, Box<dyn Error>> {
@@ -46,6 +46,10 @@ impl<T : std::marker::Send + 'static > EvtChannel<T> {
 
 	pub fn set_event(&self)   -> Result<(),Box<dyn Error>> {
 		return self.inner.borrow().set_event();
+	}
+
+	pub fn get_name(&self) -> String {
+		return self.inner.borrow().get_name();
 	}
 
 }

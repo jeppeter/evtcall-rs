@@ -310,6 +310,7 @@ impl CommonChannelInner {
 
 	fn handle_event(&mut self, evthd : u64, _evttype : u32,_parent :CommonChannel) -> Result<(),Box<dyn Error>> {
 		if evthd == self.thrrcv.get_event() {
+			debug_trace!("{} received", self.thrrcv.get_name());
 			let mut inserted : bool = false;
 			loop {
 				let op :Option<String> = self.thrrcv.get()?;
@@ -328,6 +329,7 @@ impl CommonChannelInner {
 			let _ = self.thrrcv.reset_event()?;
 		} else if evthd == self.exitevt.get_event() {
 			/*to close*/
+			debug_trace!("exitevt {} received",self.exitevt.get_name());
 			unsafe {
 				let _ = &(*self.evtmain).break_up()?;	
 			}
@@ -339,6 +341,7 @@ impl CommonChannelInner {
 	}
 
 	fn exit_notify(&mut self) -> Result<(),Box<dyn Error>> {
+		debug_trace!("notify {}",self.exitnotify.get_name());
 		self.exitnotify.set_event()?;
 		Ok(())
 	}
@@ -522,7 +525,7 @@ impl ThrMainInner {
 			if p.is_none() {
 				break;
 			}
-			debug_trace!("main thread receive [{}] [{}]",idx,p.unwrap());
+			debug_trace!("main thread receive [{}] [{}] name[{}]",idx,p.unwrap(),self.thrsnds[fidx].get_name());
 		}
 
 		self.thrcnts[fidx] += 1;

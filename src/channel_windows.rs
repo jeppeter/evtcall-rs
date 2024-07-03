@@ -102,5 +102,9 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 		}
 		Ok(())
 	}
+
+	pub (crate) fn get_name(&self) -> String {
+		format!("{}",self.name)
+	}
 }
 
