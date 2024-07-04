@@ -5,9 +5,10 @@ include!("channel_windows.rs");
 #[cfg(target_os = "linux")]
 include!("channel_linux.rs");
 
+
 #[derive(Clone)]
 pub struct EvtChannel<T : std::marker::Send + 'static > {
-	inner : Arc<RefCell<EvtChannelInner<T>>>,
+	inner : Arc<UnsafeCell<EvtChannelInner<T>>>,
 }
 
 impl<T : std::marker::Send + 'static > Drop for EvtChannel<T> {
@@ -29,29 +30,34 @@ impl<T : std::marker::Send + 'static > EvtChannel<T> {
 	}
 
 	pub fn put(&self,bv :T) -> Result<(),Box<dyn Error>> {
-		return self.inner.borrow().put(bv);
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.put(bv);
 	}
 
 	pub fn get(&self) -> Result<Option<T>,Box<dyn Error>> {
-		return self.inner.borrow().get();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.get();
 	}
 
 	pub fn get_event(&self) -> u64 {
-		return self.inner.borrow().get_event();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.get_event();
 	}
 
 	pub fn reset_event(&self)  -> Result<(),Box<dyn Error>> {
-		return self.inner.borrow().reset_event();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.reset_event();
 	}
 
 	pub fn set_event(&self)   -> Result<(),Box<dyn Error>> {
-		return self.inner.borrow().set_event();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.set_event();
 	}
 
 	pub fn get_name(&self) -> String {
-		return self.inner.borrow().get_name();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.get_name();
 	}
-
 }
 
 unsafe impl<T : std::marker::Send + 'static > Sync for EvtChannel<T> {}

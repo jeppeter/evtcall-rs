@@ -7,7 +7,7 @@ use crate::logger::*;
 use crate::*;
 use crate::consts::*;
 use std::sync::Arc;
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 
 evtcall_error_class!{SockHandleError}
 const DEFAULT_SOCKET :i32 = -2;
@@ -33,7 +33,7 @@ struct TcpSockHandleInner {
 }
 
 pub struct TcpSockHandle {
-	inner :Arc<RefCell<TcpSockHandleInner>>,
+	inner :Arc<UnsafeCell<TcpSockHandleInner>>,
 }
 
 
@@ -192,9 +192,9 @@ impl TcpSockHandleInner {
 		Ok(())
 	}
 
-	pub (crate) fn bind_server(_ipaddr :&str,_port :u32,_backlog : i32) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+	pub (crate) fn bind_server(_ipaddr :&str,_port :u32,_backlog : i32) -> Result<Arc<UnsafeCell<Self>>,Box<dyn Error>> {
 		let iretv : Self = Self::_default_new(TcpSockType::SockServerType);
-		let retv = Arc::new(RefCell::new(iretv));
+		let retv = Arc::new(UnsafeCell::new(iretv));
 		Ok(retv)
 	}
 
@@ -234,9 +234,9 @@ impl TcpSockHandleInner {
 		Ok(())
 	}
 
-	pub (crate) fn accept_socket(&mut self) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+	pub (crate) fn accept_socket(&mut self) -> Result<Arc<UnsafeCell<Self>>,Box<dyn Error>> {
 		let iretv :Self = Self::_default_new(TcpSockType::SockServerConnType);
-		let retv = Arc::new(RefCell::new(iretv));
+		let retv = Arc::new(UnsafeCell::new(iretv));
 		match self.mtype {
 			TcpSockType::SockServerType => {},
 			_ => {evtcall_new_error!{SockHandleError,"not valid type to accept"}}
@@ -249,14 +249,15 @@ impl TcpSockHandleInner {
 			}
 		}
 		assert!(self.accsock >= 0);
-		retv.borrow_mut().sock = self.accsock;
+		let mut smut1 = unsafe {&mut *retv.get()};
+		smut1.sock = self.accsock;
 		self.accsock = DEFAULT_SOCKET;
 
 
-		retv.borrow_mut().localport = self.localport;
-		retv.borrow_mut().localaddr = format!("{}",self.localaddr);
+		smut1.localport = self.localport;
+		smut1.localaddr = format!("{}",self.localaddr);
 
-		retv.borrow_mut()._get_peer_name()?;
+		smut1._get_peer_name()?;
 		self._accept_inner()?;
 
 		Ok(retv)
@@ -392,9 +393,9 @@ impl TcpSockHandleInner {
 		Ok(())
 	}
 
-	pub (crate) fn connect_client(_ipaddr :&str,_port :u32,_localip :&str, _localport :u32, _connected :bool) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+	pub (crate) fn connect_client(_ipaddr :&str,_port :u32,_localip :&str, _localport :u32, _connected :bool) -> Result<Arc<UnsafeCell<Self>>,Box<dyn Error>> {
 		let iretv :Self = Self::_default_new(TcpSockType::SockClientType);
-		let retv = Arc::new(RefCell::new(iretv));
+		let retv = Arc::new(UnsafeCell::new(iretv));
 		Ok(retv)
 	}
 
@@ -646,17 +647,20 @@ impl TcpSockHandle {
 		let retv :Self = Self {
 			inner : TcpSockHandleInner::bind_server(ipaddr,port,backlog)?,
 		};
-		retv.inner.borrow_mut().bind_server_after(ipaddr,port,backlog)?;
+		let  mut smut1 = unsafe {&mut *retv.inner.get()};
+		smut1.bind_server_after(ipaddr,port,backlog)?;
 		Ok(retv)
 	}
 
 	pub fn complete_accept(&mut self) -> Result<i32,Box<dyn Error>> {
-		return self.inner.borrow_mut().complete_accept();
+		let mut smut1 = unsafe {&mut *self.inner.get()};
+		return smut1.complete_accept();
 	}
 
 	pub fn accept_socket(&mut self) -> Result<Self,Box<dyn Error>> {
+		let mut smut1 = unsafe {&mut *self.inner.get()};
 		let retv :Self = Self {
-			inner : self.inner.borrow_mut().accept_socket()?,
+			inner : smut1.accept_socket()?,
 		};
 		Ok(retv)
 	}
@@ -665,72 +669,89 @@ impl TcpSockHandle {
 		let retv :Self = Self {
 			inner : TcpSockHandleInner::connect_client(ipaddr,port,localip,localport,connected)?,
 		};
-		retv.inner.borrow_mut().connect_client_after(ipaddr,port,localip,localport,connected)?;
+		let mut smut1 = unsafe {&mut *retv.inner.get()};
+		smut1.connect_client_after(ipaddr,port,localip,localport,connected)?;
 		Ok(retv)
 	}
 
 	pub fn get_accept_handle(&self) -> u64 {
-		return self.inner.borrow().get_accept_handle();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.get_accept_handle();
 	}
 
 	pub fn complete_connect(&mut self) -> Result<i32,Box<dyn Error>> {
-		return self.inner.borrow_mut().complete_connect();
+		let mut smut1 = unsafe {&mut *self.inner.get()};
+		return smut1.complete_connect();
 	}
 
 	pub fn complete_read(&mut self) -> Result<i32,Box<dyn Error>> {
-		return self.inner.borrow_mut().complete_read();
+		let mut smut1 = unsafe {&mut *self.inner.get()};
+		return smut1.complete_read();
 	}
 
 	pub fn complete_write(&mut self) -> Result<i32,Box<dyn Error>> {
-		return self.inner.borrow_mut().complete_write();
+		let mut smut1 = unsafe {&mut *self.inner.get()};
+		return smut1.complete_write();
 	}
 
 	pub fn read(&mut self,rbuf :*mut u8, rlen :u32) -> Result<i32,Box<dyn Error>> {
-		return self.inner.borrow_mut().read(rbuf,rlen);
+		let mut smut1 = unsafe {&mut *self.inner.get()};
+		return smut1.read(rbuf,rlen);
 	}
 
 	pub fn write(&mut self,wbuf :*mut u8, wlen :u32) -> Result<i32,Box<dyn Error>> {
-		return self.inner.borrow_mut().write(wbuf,wlen);
+		let mut smut1 = unsafe {&mut *self.inner.get()};
+		return smut1.write(wbuf,wlen);
 	}
 
 	pub fn get_read_handle(&self) -> u64 {
-		return self.inner.borrow().get_read_handle();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.get_read_handle();
 	}
 
 	pub fn get_write_handle(&self) -> u64 {
-		return self.inner.borrow().get_write_handle();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.get_write_handle();
 	}
 
 	pub fn close(&mut self) {
-		self.inner.borrow_mut().close();
+		let mut smut1 = unsafe {&mut *self.inner.get()};
+		smut1.close();
 	}
 
 	pub fn is_accept_mode(&self) -> bool {
-		return self.inner.borrow().is_accept_mode();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.is_accept_mode();
 	}
 
 	pub fn is_connect_mode(&self) -> bool {
-		return self.inner.borrow().is_connect_mode();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.is_connect_mode();
 	}
 
 	pub fn is_read_mode(&self) -> bool {
-		return self.inner.borrow().is_read_mode();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.is_read_mode();
 	}
 
 	pub fn is_write_mode(&self) -> bool {
-		return self.inner.borrow().is_write_mode();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.is_write_mode();
 	}
 
 	pub fn get_self_format(&self) -> String {
-		return self.inner.borrow().get_self_format();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.get_self_format();
 	}
 
 	pub fn get_peer_format(&self) -> String {
-		return self.inner.borrow().get_peer_format();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.get_peer_format();
 	}
 
 	pub fn get_sock_real(&self) -> u64 {
-		return self.inner.borrow().get_sock_real();
+		let s1 = unsafe {&*self.inner.get()};
+		return s1.get_sock_real();
 	}
 }
 

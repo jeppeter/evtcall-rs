@@ -26,7 +26,7 @@ use crate::logger::*;
 use crate::*;
 use crate::sockhdltype::{TcpSockType};
 use std::sync::Arc;
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 
 evtcall_error_class!{SockHandleError}
 
@@ -64,7 +64,7 @@ struct TcpSockHandleInner {
 
 #[derive(Clone)]
 pub struct TcpSockHandle {
-	inner :Arc<RefCell<TcpSockHandleInner>>,
+	inner :Arc<UnsafeCell<TcpSockHandleInner>>,
 }
 
 impl Drop for TcpSockHandle {
@@ -137,8 +137,8 @@ impl TcpSockHandleInner {
 		return name;
 	}
 
-	fn _default_new(socktype :TcpSockType) -> Arc<RefCell<Self>> {
-		Arc::new(RefCell::new(Self {
+	fn _default_new(socktype :TcpSockType) -> Arc<UnsafeCell<Self>> {
+		Arc::new(UnsafeCell::new(Self {
 			mtype : socktype,
 			sock : INVALID_SOCKET,
 			accsock : INVALID_SOCKET,
@@ -332,34 +332,38 @@ impl TcpSockHandleInner {
 		Ok(self.inacc)
 	}
 
-	pub (crate) fn bind_server(ipaddr :&str,port :u32,backlog : i32) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+	pub (crate) fn bind_server(ipaddr :&str,port :u32,backlog : i32) -> Result<Arc<UnsafeCell<Self>>,Box<dyn Error>> {
 		if ipaddr.len() == 0 || port == 0 {
 			evtcall_new_error!{SockHandleError,"not valid ipaddr [{}] or port [{}]",ipaddr,port}
 		}
-		let retv :Arc<RefCell<Self>> = Self::_default_new(TcpSockType::SockServerType);
+		let retv :Arc<UnsafeCell<Self>> = Self::_default_new(TcpSockType::SockServerType);
 		let ret :i32;
 		let mut iret :c_int;
 		let opt :c_int;
 		let mut block :u_long;
 		let accguid:GUID = WSAID_ACCEPTEX;
 
-		retv.borrow_mut().localaddr = format!("{}",ipaddr);
-		retv.borrow_mut().localport = port;
+		let mut smut1 = unsafe {&mut* retv.get()};
+
+		smut1.localaddr = format!("{}",ipaddr);
+		smut1.localport = port;
 		unsafe {
-			retv.borrow_mut().sock = socket(AF_INET,SOCK_STREAM,0);
+			smut1.sock = socket(AF_INET,SOCK_STREAM,0);
 		}
 
-		if retv.borrow().sock == INVALID_SOCKET {
+		let s1 = unsafe {&* retv.get()};
+
+		if s1.sock == INVALID_SOCKET {
 			ret = get_errno!();
 			evtcall_new_error!{SockHandleError,"cannot socket error {}",ret}
 		}
-		evtcall_log_trace!("sock 0x{:x}",retv.borrow().sock);
+		evtcall_log_trace!("sock 0x{:x}",s1.sock);
 
 		opt = 1;
 		unsafe {
 			let _optptr = (&opt as *const c_int) as *const c_char;
 			let _optsize = std::mem::size_of::<DWORD>() as c_int;
-			iret = setsockopt(retv.borrow().sock,SOL_SOCKET,SO_REUSEADDR,_optptr,_optsize);
+			iret = setsockopt(s1.sock,SOL_SOCKET,SO_REUSEADDR,_optptr,_optsize);
 		}
 
 		if iret == SOCKET_ERROR {
@@ -371,7 +375,7 @@ impl TcpSockHandleInner {
 		block = 1;
 		unsafe {
 			let _blkptr = &mut block as * mut u_long;
-			iret = ioctlsocket(retv.borrow().sock,FIONBIO,_blkptr);
+			iret = ioctlsocket(s1.sock,FIONBIO,_blkptr);
 		}
 
 		if iret == SOCKET_ERROR {
@@ -379,13 +383,14 @@ impl TcpSockHandleInner {
 			evtcall_new_error!{SockHandleError,"cannot set non-block error {}",ret}
 		}
 
-		retv.borrow_mut()._bind_addr(ipaddr,port)?;
+		let mut smut1 = unsafe {&mut* retv.get()};
+		smut1._bind_addr(ipaddr,port)?;
 
-		create_event_safe!(retv.borrow_mut().accov.hEvent,"connov handle",SockHandleError);
+		create_event_safe!(smut1.accov.hEvent,"connov handle",SockHandleError);
 
-		evtcall_log_trace!("sock 0x{:x} backlog {}",retv.borrow().sock,backlog);
+		evtcall_log_trace!("sock 0x{:x} backlog {}",s1.sock,backlog);
 		unsafe {
-			iret = listen(retv.borrow().sock,backlog);
+			iret = listen(s1.sock,backlog);
 		}
 		if iret == SOCKET_ERROR {
 			ret = get_wsa_errno!();
@@ -393,8 +398,8 @@ impl TcpSockHandleInner {
 
 		}
 
-		retv.borrow_mut()._get_accept_func(&accguid)?;
-		let _ = retv.borrow_mut()._inner_accept()?;
+		smut1._get_accept_func(&accguid)?;
+		let _ = smut1._inner_accept()?;
 
 		Ok(retv)
 	}
@@ -531,8 +536,8 @@ impl TcpSockHandleInner {
 		Ok(())
 	}
 
-	pub (crate) fn accept_socket(&mut self) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
-		let retv :Arc<RefCell<Self>> = Self::_default_new(TcpSockType::SockServerConnType);
+	pub (crate) fn accept_socket(&mut self) -> Result<Arc<UnsafeCell<Self>>,Box<dyn Error>> {
+		let retv :Arc<UnsafeCell<Self>> = Self::_default_new(TcpSockType::SockServerConnType);
 		let sret :c_int;
 		let sv :i32;
 		evtcall_log_trace!(" ");
@@ -548,38 +553,42 @@ impl TcpSockHandleInner {
 		if self.accsock == INVALID_SOCKET || self.inacc > 0 {
 			evtcall_new_error!{SockHandleError,"not valid state for accept socket"}
 		}
-		retv.borrow_mut().localaddr = format!("{}",self.localaddr);
-		retv.borrow_mut().localport = self.localport;
+		let mut smut1 = unsafe{&mut* retv.get()};
+		let s1 = unsafe{&*retv.get()};
+		smut1.localaddr = format!("{}",self.localaddr);
+		smut1.localport = self.localport;
 		evtcall_log_trace!(" ");
 
 		/*to make */
-		retv.borrow_mut().sock = self.accsock;
+		smut1.sock = self.accsock;
 		self.accsock = INVALID_SOCKET;
 
-		evtcall_log_trace!("retv.sock 0x{:x} self.sock 0x{:x}",retv.borrow().sock,self.sock);
+		evtcall_log_trace!("retv.sock 0x{:x} self.sock 0x{:x}",s1.sock,self.sock);
 
 		unsafe {
 			let _sptr = ((&self.sock) as *const SOCKET) as *const c_char;
 			let _slen = std::mem::size_of::<SOCKET>() as i32;
 			evtcall_log_trace!("_sptr {:p} _slen {}",_sptr,_slen);
-			sret = setsockopt(retv.borrow().sock,SOL_SOCKET,SO_UPDATE_ACCEPT_CONTEXT,_sptr,_slen);
+			sret = setsockopt(s1.sock,SOL_SOCKET,SO_UPDATE_ACCEPT_CONTEXT,_sptr,_slen);
 		}
 
 		//evtcall_log_trace!(" ");
 
+		let s1 = unsafe{&*retv.get()};
 		if sret != 0 {
 			sv = get_wsa_errno_direct!();
-			evtcall_log_trace!("retv.sock 0x{:x} self.sock 0x{:x} get sv {}",retv.borrow().sock,self.sock,sv);
-			evtcall_new_error!{SockHandleError,"get [{}:{}] SO_UPDATE_ACCEPT_CONTEXT error sret {} {}",retv.borrow().localaddr,retv.borrow().localport,sret,sv}
+			evtcall_log_trace!("retv.sock 0x{:x} self.sock 0x{:x} get sv {}",s1.sock,self.sock,sv);
+			evtcall_new_error!{SockHandleError,"get [{}:{}] SO_UPDATE_ACCEPT_CONTEXT error sret {} {}",s1.localaddr,s1.localport,sret,sv}
 		}
 
+		let mut smut1 = unsafe{&mut*retv.get()};
 		if self.ooaccrd > 0 {
-			retv.borrow_mut().oordbuf = self.accrdbuf.clone();
-			retv.borrow_mut().oordlen = self.ooaccrd;			
+			smut1.oordbuf = self.accrdbuf.clone();
+			smut1.oordlen = self.ooaccrd;			
 		}
 
-		retv.borrow_mut()._get_peer_name()?;
-		retv.borrow_mut()._inner_make_read_write()?;
+		smut1._get_peer_name()?;
+		smut1._inner_make_read_write()?;
 
 		let _ = self._inner_accept()?;
 
@@ -701,24 +710,25 @@ impl TcpSockHandleInner {
 	}
 
 
-	pub (crate) fn connect_client(ipaddr :&str,port :u32,localip :&str, localport :u32, connected :bool) -> Result<Arc<RefCell< Self>>,Box<dyn Error>> {
-		let retv : Arc<RefCell<Self>> = Self::_default_new(TcpSockType::SockClientType);
+	pub (crate) fn connect_client(ipaddr :&str,port :u32,localip :&str, localport :u32, connected :bool) -> Result<Arc<UnsafeCell< Self>>,Box<dyn Error>> {
+		let retv : Arc<UnsafeCell<Self>> = Self::_default_new(TcpSockType::SockClientType);
 		let mut eret :u32;
 		let mut block :u_long;
 		let mut iret :c_int;
 		let guid :GUID = WSAID_CONNECTEX;
 		let mut bret :BOOL;
 		let mut dret :DWORD;
-
-		retv.borrow_mut().peeraddr = format!("{}",ipaddr);
-		retv.borrow_mut().peerport = port;
+		let mut smut1 = unsafe{&mut*retv.get()};
+		let s1 = unsafe{&*retv.get()};
+		smut1.peeraddr = format!("{}",ipaddr);
+		smut1.peerport = port;
 		unsafe {
-			retv.borrow_mut().sock = socket(AF_INET,SOCK_STREAM,0);
+			smut1.sock = socket(AF_INET,SOCK_STREAM,0);
 		}
 
 
-		evtcall_log_trace!("sock 0x{:x}",retv.borrow().sock);
-		if retv.borrow().sock == INVALID_SOCKET {
+		evtcall_log_trace!("sock 0x{:x}",s1.sock);
+		if s1.sock == INVALID_SOCKET {
 			iret = get_wsa_errno!();
 			evtcall_new_error!{SockHandleError,"socket client error {}",iret}
 		}
@@ -726,7 +736,7 @@ impl TcpSockHandleInner {
 		block = 1;
 		unsafe {
 			let _bptr = (&mut block) as *mut u_long;
-			iret = ioctlsocket(retv.borrow().sock,FIONBIO,_bptr);
+			iret = ioctlsocket(s1.sock,FIONBIO,_bptr);
 		}
 
 		if iret == SOCKET_ERROR {
@@ -734,35 +744,35 @@ impl TcpSockHandleInner {
 			evtcall_new_error!{SockHandleError,"ioctlsocket FIONBIO error {}",iret}
 		}
 
-		retv.borrow_mut()._bind_addr(localip,localport)?;
+		smut1._bind_addr(localip,localport)?;
 
 
-		create_event_safe!(retv.borrow_mut().connov.hEvent,"connov event",SockHandleError);
+		create_event_safe!(smut1.connov.hEvent,"connov event",SockHandleError);
 
-		retv.borrow_mut()._get_connect_func(&guid)?;
-		let completed = retv.borrow_mut()._call_connect_func(ipaddr,port)?;
+		smut1._get_connect_func(&guid)?;
+		let completed = smut1._call_connect_func(ipaddr,port)?;
 		evtcall_log_trace!("_call_connect_func completed {}",completed);
 		if completed == 0 {
-			retv.borrow_mut().inconn = 1;
+			smut1.inconn = 1;
 		} else {
-			retv.borrow_mut().inconn = 0;
-			retv.borrow_mut()._get_self_name()?;
-			retv.borrow_mut()._inner_make_read_write()?;
+			smut1.inconn = 0;
+			smut1._get_self_name()?;
+			smut1._inner_make_read_write()?;
 		}
 
 		evtcall_log_trace!(" ");
-		let inconn = retv.borrow().inconn;
+		let inconn = s1.inconn;
 
 		if inconn > 0 && connected {
 			loop {
 				unsafe {
-					dret = WaitForSingleObject(retv.borrow().connov.hEvent,INFINITE);
+					dret = WaitForSingleObject(s1.connov.hEvent,INFINITE);
 				}
 				if dret == WAIT_OBJECT_0 {
 					unsafe {
-						let _ovptr = &mut retv.borrow_mut().connov;
+						let _ovptr = &mut smut1.connov;
 						let _dretptr = &mut dret;
-						bret = GetOverlappedResult(retv.borrow().sock as HANDLE,_ovptr,_dretptr,FALSE);
+						bret = GetOverlappedResult(s1.sock as HANDLE,_ovptr,_dretptr,FALSE);
 					}
 					if bret == TRUE {
 						break;
@@ -779,12 +789,12 @@ impl TcpSockHandleInner {
 			}
 
 			/*we already connected*/
-			retv.borrow_mut().inconn = 0;
-			retv.borrow_mut()._get_self_name()?;
-			retv.borrow_mut()._inner_make_read_write()?;
+			smut1.inconn = 0;
+			smut1._get_self_name()?;
+			smut1._inner_make_read_write()?;
 		}
 
-		evtcall_log_trace!("connect [{}:{}] inconn {} self {:p}",ipaddr,port,retv.borrow().inconn,&retv);
+		evtcall_log_trace!("connect [{}:{}] inconn {} self {:p}",ipaddr,port,s1.inconn,&retv);
 		Ok(retv)
 	}
 
@@ -1097,7 +1107,8 @@ impl TcpSockHandleInner {
 
 impl TcpSockHandle {
 	pub fn close(&mut self) {
-		self.inner.borrow_mut().close();
+		let mut smut1 = unsafe{&mut*self.inner.get()};
+		smut1.close();
 		return;
 	}
 
@@ -1114,10 +1125,12 @@ impl TcpSockHandle {
 	}
 
 	pub  fn get_accept_handle(&self) -> u64 {
-		return self.inner.borrow().get_accept_handle();
+		let s1 = unsafe{&*self.inner.get()};
+		return s1.get_accept_handle();
 	}
 
 	pub fn get_connect_handle(&self) -> u64 {
+		let s1 = unsafe{&*self.inner.get()};
 		return self.inner.borrow().get_connect_handle();
 	}
 
@@ -1136,7 +1149,7 @@ impl TcpSockHandle {
 
 
 	pub fn accept_socket(&mut self) -> Result<Self,Box<dyn Error>> {
-		let ninner :Arc<RefCell<TcpSockHandleInner>> = self.inner.borrow_mut().accept_socket()?;
+		let ninner :Arc<UnsafeCell<TcpSockHandleInner>> = self.inner.borrow_mut().accept_socket()?;
 		Ok(Self{
 			inner : ninner,
 		})
@@ -1145,7 +1158,7 @@ impl TcpSockHandle {
 
 
 	pub  fn connect_client(ipaddr :&str,port :u32,localip :&str, localport :u32, connected :bool) -> Result<Self,Box<dyn Error>> {
-		let ninner :Arc<RefCell<TcpSockHandleInner>> = TcpSockHandleInner::connect_client(ipaddr,port,localip,localport,connected)?;
+		let ninner :Arc<UnsafeCell<TcpSockHandleInner>> = TcpSockHandleInner::connect_client(ipaddr,port,localip,localport,connected)?;
 		Ok(Self {
 			inner : ninner,
 		})

@@ -2,7 +2,7 @@
 use std::sync::{mpsc,Arc};
 use crate::*;
 use std::error::Error;
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 
 #[allow(unused_imports)]
 use crate::logger::*;
@@ -33,7 +33,7 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 		}
 	}
 
-	pub (crate) fn new(_maxsize :usize, s :&str) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+	pub (crate) fn new(_maxsize :usize, s :&str) -> Result<Arc<UnsafeCell<Self>>,Box<dyn Error>> {
 		let (tx,rx) = mpsc::channel::<T>();
 		let mut retv : Self = Self {
 			snd : tx,
@@ -51,7 +51,7 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 			evtcall_new_error!{EvtChannelError,"cannot eventfd {} {}",retv.name,erri}
 		}
 
-		Ok(Arc::new(RefCell::new(retv)))
+		Ok(Arc::new(UnsafeCell::new(retv)))
 	}
 
 	pub (crate) fn set_event(&self) -> Result<(),Box<dyn Error>> {

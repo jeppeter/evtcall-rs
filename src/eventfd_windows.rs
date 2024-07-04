@@ -32,7 +32,6 @@ impl Drop for EventFdInner {
 evtcall_error_class!{EventFdError}
 
 impl EventFdInner {
-	//fn new(_initval :i32,name :&str) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
 	fn new(_initval :i32,flags :u32,name :&str) -> Result<Arc<RwLock<Self>>,Box<dyn Error>> {
 		let mut retv :Self = Self {
 			evt : NULL_HANDLE_VALUE,
