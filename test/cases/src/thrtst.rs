@@ -247,6 +247,7 @@ struct CommonChannelInner {
 	evtmain :*mut EvtMain,
 	insertrcv : bool,
 	insertexit : bool,
+	rndmax : u64,
 }
 
 #[derive(Clone)]
@@ -261,7 +262,7 @@ impl Drop for CommonChannelInner {
 }
 
 impl CommonChannelInner {
-	fn new(rcv :EvtChannel<String>,snd :EvtChannel<String>, exitevt : EventFd,exitnotify :EventFd,evtmain :*mut EvtMain) -> Result<Arc<RefCell<Self>>, Box<dyn Error>> {
+	fn new(rcv :EvtChannel<String>,snd :EvtChannel<String>, exitevt : EventFd,exitnotify :EventFd,evtmain :*mut EvtMain,rndmax :u64) -> Result<Arc<RefCell<Self>>, Box<dyn Error>> {
 		let retv :Self = Self {
 			thrrcv : rcv.clone(),
 			thrsnd : snd.clone(),
@@ -270,6 +271,7 @@ impl CommonChannelInner {
 			evtmain : evtmain,
 			insertrcv : false,
 			insertexit : false,
+			rndmax :rndmax,
 		};
 
 		Ok(Arc::new(RefCell::new(retv)))
@@ -359,9 +361,9 @@ impl Drop for CommonChannel {
 }
 
 impl CommonChannel {
-	fn new(rcv :EvtChannel<String>,snd :EvtChannel<String>,exitevt : EventFd,exitnotify :EventFd, evtmain :*mut EvtMain) -> Result<Self,Box<dyn Error>> {
+	fn new(rcv :EvtChannel<String>,snd :EvtChannel<String>,exitevt : EventFd,exitnotify :EventFd, evtmain :*mut EvtMain,rndmax :u64) -> Result<Self,Box<dyn Error>> {
 		let retv : Self = Self {
-			inner : CommonChannelInner::new(rcv,snd,exitevt,exitnotify,evtmain)?,
+			inner : CommonChannelInner::new(rcv,snd,exitevt,exitnotify,evtmain,rndmax)?,
 		};
 		let _ = retv.inner.borrow_mut().add_events(retv.clone())?;
 		Ok(retv)
@@ -391,12 +393,12 @@ impl EvtCall for CommonChannel {
 	}
 }
 
-fn evtchannel_thread(snd :EvtChannel<String>,rcv :EvtChannel<String>,exitevt : EventFd,exitnotify :EventFd) -> Result<(),Box<dyn Error>> {
+fn evtchannel_thread(snd :EvtChannel<String>,rcv :EvtChannel<String>,exitevt : EventFd,exitnotify :EventFd,rndmax :u64) -> Result<(),Box<dyn Error>> {
 	let mut evtmain :EvtMain;
 	debug_trace!("threads [{:?}]",std::thread::current().id());
 	evtmain = EvtMain::new(0)?;
 	let evtptr = &mut evtmain as *mut EvtMain;
-	let mut cmnchl :CommonChannel = CommonChannel::new(rcv,snd,exitevt,exitnotify,evtptr)?;
+	let mut cmnchl :CommonChannel = CommonChannel::new(rcv,snd,exitevt,exitnotify,evtptr,rndmax)?;
 	let _ = evtmain.main_loop()?;
 	debug_trace!("exit_notify");
 	let _ = cmnchl.exit_notify()?;
@@ -804,7 +806,7 @@ fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetI
 		rcvcnts.push(0);
 
 		handles.push(std::thread::spawn(move || {
-			let _ = evtchannel_thread(thrsnd.clone(),thrrcv.clone(),exitevt.clone(),exitnotify.clone());
+			let _ = evtchannel_thread(thrsnd.clone(),thrrcv.clone(),exitevt.clone(),exitnotify.clone(),rndmax);
 		}));
 	}
 	let sigv :Vec<u32> = vec![SIG_INT,SIG_TERM];
