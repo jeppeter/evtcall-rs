@@ -5,9 +5,11 @@ include!("channel_windows.rs");
 #[cfg(target_os = "linux")]
 include!("channel_linux.rs");
 
+use std::sync::RwLock;
+
 #[derive(Clone)]
 pub struct EvtChannel<T : std::marker::Send + 'static > {
-	inner : Arc<RefCell<EvtChannelInner<T>>>,
+	inner : Arc<RwLock<EvtChannelInner<T>>>,
 }
 
 impl<T : std::marker::Send + 'static > Drop for EvtChannel<T> {
@@ -23,33 +25,56 @@ impl<T : std::marker::Send + 'static > EvtChannel<T> {
 
 	pub fn new(maxsize :usize, s :&str) -> Result<Self, Box<dyn Error>> {
 		let retv :Self = Self {
-			inner : EvtChannelInner::new(maxsize,s)?,
+			inner : Arc::new(RwLock::new(EvtChannelInner::new(maxsize,s)?)),
 		};
 		Ok(retv)
 	}
 
 	pub fn put(&self,bv :T) -> Result<(),Box<dyn Error>> {
-		return self.inner.borrow().put(bv);
+		let bres = self.inner.read();
+		if bres.is_err() {
+			evtcall_new_error!{EvtChannelError,"read error {:?}",bres.err().unwrap()}
+		}
+		let b = bres.unwrap();
+		let retv = b.put(bv);
+		return retv;
 	}
 
 	pub fn get(&self) -> Result<Option<T>,Box<dyn Error>> {
-		return self.inner.borrow().get();
+		let bres = self.inner.read();
+		if bres.is_err() {
+			evtcall_new_error!{EvtChannelError,"read error {:?}",bres.err().unwrap()}
+		}
+		let b = bres.unwrap();
+		return b.get();
 	}
 
 	pub fn get_event(&self) -> u64 {
-		return self.inner.borrow().get_event();
+		let b = self.inner.read().unwrap();
+		return b.get_event();
 	}
 
 	pub fn reset_event(&self)  -> Result<(),Box<dyn Error>> {
-		return self.inner.borrow().reset_event();
+		let bres = self.inner.read();
+		if bres.is_err() {
+			evtcall_new_error!{EvtChannelError,"read error {:?}",bres.err().unwrap()}
+		}
+		let b = bres.unwrap();
+		return b.reset_event();
 	}
 
 	pub fn set_event(&self)   -> Result<(),Box<dyn Error>> {
-		return self.inner.borrow().set_event();
+		let bres = self.inner.read();
+		if bres.is_err() {
+			evtcall_new_error!{EvtChannelError,"read error {:?}",bres.err().unwrap()}
+		}
+		let b = bres.unwrap();
+		return b.set_event();
 	}
 
 	pub fn get_name(&self) -> String {
-		return self.inner.borrow().get_name();
+		let b = self.inner.read().unwrap();
+		return b.get_name();
 	}
 
 }

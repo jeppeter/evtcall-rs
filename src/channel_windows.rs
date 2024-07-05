@@ -3,7 +3,6 @@ use std::sync::{mpsc,Arc};
 use crate::*;
 use crate::consts_windows::*;
 use std::error::Error;
-use std::cell::RefCell;
 
 
 
@@ -38,7 +37,7 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 		close_handle_safe!(self.evt,"evt");
 	}
 
-	pub (crate) fn new(_maxsize :usize,s :&str) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+	pub (crate) fn new(_maxsize :usize,s :&str) -> Result<Self,Box<dyn Error>> {
 		let (tx,rx) = mpsc::channel::<T>();
 		let mut retv : Self = Self {
 			snd : tx,
@@ -50,7 +49,7 @@ impl<T: std::marker::Send + 'static > EvtChannelInner<T> {
 
 		create_event_safe!(retv.evt,&note,EvtChannelError);
 
-		Ok(Arc::new(RefCell::new(retv)))
+		Ok(retv)
 	}
 
 	pub (crate) fn set_event(&self) -> Result<(),Box<dyn Error>> {
