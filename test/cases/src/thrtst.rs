@@ -27,6 +27,8 @@ use extargsparse_worker::{extargs_error_class,extargs_new_error};
 use extlog::loglib::{log_get_timestamp,log_output_function};
 use super::strop::*;
 use super::logtrans::{init_log};
+use super::exithdl::{init_exit_handle,fini_exit_handle};
+use super::exithdl_consts::*;
 use extlog::{debug_trace,debug_error,format_str_log,debug_warn,debug_info,debug_debug};
 use evtcall::interface::*;
 use evtcall::consts::*;
@@ -46,7 +48,7 @@ struct logarg {
 }
 
 
-fn logtest_thread(arg :logarg) {
+fn logtest_thread(arg :logarg,rndmax :u64) {
 	let mut rnd = rand::thread_rng();
 	for i in 0..arg.num {
 		debug_trace!("{:?} thread {} trace",std::thread::current().id(),i);
@@ -54,7 +56,7 @@ fn logtest_thread(arg :logarg) {
 		debug_info!("{:?} thread {} info",std::thread::current().id(),i);
 		debug_warn!("{:?} thread {} warn",std::thread::current().id(),i);
 		debug_error!("{:?} thread {} error",std::thread::current().id(),i);
-		let val :u64 = rnd.gen::<u64>() % 1000;
+		let val :u64 = rnd.gen::<u64>() % rndmax;
 		debug_error!("{:?} sleep {}",std::thread::current().id(),val);
 		std::thread::sleep(std::time::Duration::from_millis(val));
 	}
@@ -71,6 +73,7 @@ fn logtstthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	let mut stopvec :Vec<Arc<EventFd>>=Vec::new();
 	let mut namevec :Vec<String> = Vec::new();
 	let mut bname :String;
+	let rndmax :u64 = 1000;
 	//let mut rnd = rand::thread_rng();
 
 
@@ -92,7 +95,7 @@ fn logtstthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 			stopsig : curstop.clone(),
 		};
 		handles.push(std::thread::spawn(move || {
-			logtest_thread(logvar);
+			logtest_thread(logvar,rndmax);
 		}));
 	}
 
@@ -137,7 +140,7 @@ fn logtstthr_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 	Ok(())
 }
 
-fn logchannel_thread(arg :logarg,rx :mpsc::Receiver<i32>) {
+fn logchannel_thread(arg :logarg,rx :mpsc::Receiver<i32>,rndmax :u64) {
 	let mut rnd = rand::thread_rng();
 	for i in 0..arg.num {
 		debug_error!("{:?} thread {} error",std::thread::current().id(),i);
@@ -149,7 +152,7 @@ fn logchannel_thread(arg :logarg,rx :mpsc::Receiver<i32>) {
 				break;
 			}
 		}
-		let val :u64 = rnd.gen::<u64>() % 1000;
+		let val :u64 = rnd.gen::<u64>() % rndmax;
 		debug_error!("{:?} sleep {}",std::thread::current().id(),val);
 		std::thread::sleep(std::time::Duration::from_millis(val));
 	}
@@ -168,6 +171,7 @@ fn thrsharedata_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSe
 	let mut namevec :Vec<String> = Vec::new();
 	let mut sndchannels :Vec<mpsc::Sender<i32>> = Vec::new();
 	let mut bname :String;
+	let rndmax :u64 = ns.get_int("randmax") as u64;
 	//let mut rnd = rand::thread_rng();
 
 
@@ -191,7 +195,7 @@ fn thrsharedata_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSe
 			stopsig : curstop.clone(),
 		};
 		handles.push(std::thread::spawn(move || {
-			logchannel_thread(logvar,rx);
+			logchannel_thread(logvar,rx,rndmax);
 		}));
 	}
 
@@ -411,7 +415,10 @@ struct ThrMainInner {
 	insertsnds : Vec<i32>,
 	timeguids : Vec<u64>,
 	evtmain : *mut EvtMain,
+	exithd : u64,
+	inserthd : bool,
 	maxcnt : i32,
+	rndmax : u64,
 }
 
 impl Drop for ThrMainInner {
@@ -436,7 +443,7 @@ impl ThrMainInner {
 		self.close_inner();		
 	}
 	fn new(thrs : Vec<std::thread::JoinHandle<()>>,exitevts :Vec<EventFd>,exitnotifies : Vec<EventFd>,
-		thrrcvs :Vec<EvtChannel<String>>,thrsnds : Vec<EvtChannel<String>>,evtmain :*mut EvtMain,times : i32) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
+		thrrcvs :Vec<EvtChannel<String>>,thrsnds : Vec<EvtChannel<String>>,evtmain :*mut EvtMain,times : i32,exithd :u64,rndmax :u64) -> Result<Arc<RefCell<Self>>,Box<dyn Error>> {
 		let mut retv : Self = Self {
 			thrs : thrs,
 			exitevts : exitevts.clone(),
@@ -448,7 +455,10 @@ impl ThrMainInner {
 			insertsnds : Vec::new(),
 			timeguids : Vec::new(),
 			evtmain : evtmain,
+			exithd : exithd,
+			inserthd : false,
 			maxcnt : times,
+			rndmax : rndmax,
 		};
 
 		for _ in 0..retv.thrs.len() {
@@ -480,12 +490,19 @@ impl ThrMainInner {
 			}
 
 			if self.timeguids[i] == 0 {
-				let val :u64 = rnd.gen::<u64>() % 1000;
+				let val :u64 = rnd.gen::<u64>() % self.rndmax;
 				unsafe {
 					self.timeguids[i] = (*self.evtmain).add_timer(Arc::new(RefCell::new(parent.clone())),val as i32, false)?;
 				}
 				debug_trace!("add [{}] timeguids[0x{:x}] val {}",i,self.timeguids[i],val);
 			}
+		}
+
+		if !self.inserthd {
+			unsafe {
+				let _ = (*self.evtmain).add_event(Arc::new(RefCell::new(parent.clone())),self.exithd,READ_EVENT)?;
+			}
+			self.inserthd = true;
 		}
 		Ok(())
 	}
@@ -542,7 +559,7 @@ impl ThrMainInner {
 				self.timeguids[fidx]  = 0;
 			}
 			let mut rnd = rand::thread_rng();
-			let val :u64 = rnd.gen::<u64>() % 1000;
+			let val :u64 = rnd.gen::<u64>() % self.rndmax;
 
 			unsafe {
 				self.timeguids[fidx] = (*self.evtmain).add_timer(Arc::new(RefCell::new(parent.clone())), val as i32 , false)?;
@@ -623,7 +640,14 @@ impl ThrMainInner {
 			if fidx >= 0 {
 				let _ = self._handle_thread_exit(fidx,parent.clone())?;
 			} else {
-				extargs_new_error!{ThrHdlError,"evthd 0x{:x} not recognize",evthd}
+				if evthd == self.exithd {
+					unsafe {
+						let _ = (*self.evtmain).break_up()?;
+					}
+				} else {
+					extargs_new_error!{ThrHdlError,"evthd 0x{:x} not recognize",evthd}	
+				}
+				
 			}
 		}
 
@@ -669,6 +693,13 @@ impl ThrMainInner {
 			}
 		}
 
+		if self.inserthd {
+			unsafe {
+				let _ = (*self.evtmain).remove_event(self.exithd);
+			}
+			self.inserthd = false;
+		}
+
 		return;
 	}
 
@@ -690,9 +721,9 @@ impl ThrMain {
 	}
 
 	fn new(thrs : Vec<std::thread::JoinHandle<()>>,exitevts :Vec<EventFd>,exitnotifies : Vec<EventFd>,
-		thrrcvs :Vec<EvtChannel<String>>,thrsnds : Vec<EvtChannel<String>>,evtmain :*mut EvtMain,times : i32) -> Result<Self,Box<dyn Error>> {
+		thrrcvs :Vec<EvtChannel<String>>,thrsnds : Vec<EvtChannel<String>>,evtmain :*mut EvtMain,times : i32,exithd :u64,rndmax :u64) -> Result<Self,Box<dyn Error>> {
 		let retv : Self = Self {
-			inner : ThrMainInner::new(thrs,exitevts,exitnotifies,thrrcvs,thrsnds,evtmain,times)?,
+			inner : ThrMainInner::new(thrs,exitevts,exitnotifies,thrrcvs,thrsnds,evtmain,times,exithd,rndmax)?,
 		};
 		let _ = retv.inner.borrow_mut().insert_events(retv.clone())?;
 		Ok(retv)
@@ -739,6 +770,7 @@ fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetI
 	let mut thrsnds :Vec<EvtChannel<String>> = Vec::new();
 	let mut sndcnts :Vec<usize> = Vec::new();
 	let mut rcvcnts :Vec<usize> = Vec::new();
+	let rndmax :u64 = ns.get_int("randmax") as u64;
 	//let mut rnd = rand::thread_rng();
 
 
@@ -775,12 +807,14 @@ fn thrchannel_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetI
 			let _ = evtchannel_thread(thrsnd.clone(),thrrcv.clone(),exitevt.clone(),exitnotify.clone());
 		}));
 	}
-
+	let sigv :Vec<u32> = vec![SIG_INT,SIG_TERM];
+	let exithd = init_exit_handle(sigv)?;
 	let mut evtmain : EvtMain = EvtMain::new(0)?;
-	let mainthrs :ThrMain = ThrMain::new(handles,exitvec,notifyvec,thrrcvs,thrsnds,&mut evtmain as *mut EvtMain,times)?;
+	let mainthrs :ThrMain = ThrMain::new(handles,exitvec,notifyvec,thrrcvs,thrsnds,&mut evtmain as *mut EvtMain,times,exithd,rndmax)?;
 
 	let _ = evtmain.main_loop()?;
 
+	fini_exit_handle();
 	Ok(())
 }
 
@@ -1055,6 +1089,7 @@ fn defertest_handler(ns :NameSpaceEx,_optargset :Option<Arc<RefCell<dyn ArgSetIm
 pub fn load_thread_handler(parser :ExtArgsParser) -> Result<(),Box<dyn Error>> {
 	let cmdline = r#"
 	{
+		"randmax" : 1000,
 		"logtstthr<logtstthr_handler>##[times] [threads] to log##" : {
 			"$" : "*"
 		},
