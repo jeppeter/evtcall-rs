@@ -2,6 +2,7 @@
 > rust event driven framework 
 
 ### Release History
+* Jul 8th 2024 to release 0.2.8 to make EvtChannel with RwLock replace RefCell
 * Jul 3rd 2024 to release 0.2.6 to add get_name in EvtChannel
 * Apr 11th 2024 to release 0.2.2 to add DeferCall when call defer functions when functions return
 * Apr 11th 2024 to release 0.2.0 for name changed ThreadEvent
