@@ -639,6 +639,10 @@ impl TcpSockHandleInner {
 	pub (crate) fn get_sock_real(&self) -> u64 {
 		return self.sock as u64;
 	}
+
+	pub (crate) fn is_close_error(&self) -> bool {
+		return self.iscloseerr;
+	}
 }
 
 impl TcpSockHandle {
@@ -731,6 +735,10 @@ impl TcpSockHandle {
 
 	pub fn get_sock_real(&self) -> u64 {
 		return self.inner.borrow().get_sock_real();
+	}
+
+	pub fn is_close_error(&self) -> bool {
+		return self.inner.borrow().is_close_error();
 	}
 }
 
