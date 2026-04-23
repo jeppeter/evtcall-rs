@@ -19,7 +19,7 @@ extargs_error_class!{SigHdlError}
 static mut EXIT_EVENTFD :Option<EventFd> = None;
 //}
 
-
+#[allow(static_mut_refs)]
 unsafe fn rust_signal(_iv :libc::c_int) {
 	if  EXIT_EVENTFD.is_some() {
 		let r :EventFd = EXIT_EVENTFD.as_ref().unwrap().clone();
@@ -73,7 +73,7 @@ fn _get_exit_fd(sigs :Vec<u32>) -> Option<EventFd> {
 	Some(bres.unwrap())
 }
 
-
+#[allow(static_mut_refs)]
 pub fn init_exit_handle(sigs :Vec<u32>) -> Result<u64,Box<dyn Error>> {
 	let mut retv :u64 = INVALID_EVENT_HANDLE;
 	let mut ok :bool = false;
