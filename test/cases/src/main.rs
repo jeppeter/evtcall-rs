@@ -32,9 +32,13 @@ mod logtrans;
 mod strop;
 mod fileop;
 mod exithdl_consts;
+#[allow(unexpected_cfgs)]
 mod exithdl;
+#[allow(unexpected_cfgs)]
 mod evttcphdl;
+#[allow(unexpected_cfgs)]
 mod thrtst;
+#[allow(unexpected_cfgs)]
 mod timertst;
 
 
